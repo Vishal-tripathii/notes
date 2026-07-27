@@ -22,8 +22,9 @@
 8. [Virtuals](#virtuals)
 9. [Transactions](#transactions)
 10. [Cascade deletes](#cascade) ⭐
-11. [Interview Questions & Answers](#interview)
-12. [Cheat Sheet](#cheatsheet)
+11. [MongoDB vs SQL indexes — syntax, and where MySQL fits](#sql-compare) ⭐
+12. [Interview Questions & Answers](#interview)
+13. [Cheat Sheet](#cheatsheet)
 
 ---
 
@@ -503,8 +504,80 @@ orders.filter(o => o.userId)          // ⭐ populate returns null for missing r
 
 ---
 
+<a name="sql-compare"></a>
+# 11. ⭐ MongoDB vs SQL indexes — syntax, and where MySQL fits
+
+Everything in §3–§5 is Mongo-specific. Here's how it lines up against SQL, since the two get compared constantly in interviews.
+
+## Same underlying idea, different vocabulary
+
+Both use a **B-tree** — a sorted structure of pointers back to the real data. The tradeoff is identical too: **faster reads, slower writes, more storage**, because every index has to be updated on every write.
+
+| | SQL (MySQL/Postgres) | MongoDB |
+|---|---|---|
+| Underlying structure | B-tree | B-tree |
+| Default index | Primary key → **clustered** (physically sorts the table) | `_id` → unique index, auto-created |
+| Compound-index rule | **Leftmost-prefix** | **ESR** — Equality, Sort, Range (§4) |
+| Array fields | No native support — needs a join table | **Multikey** index — indexes every array element |
+| Auto-expiry | Not built in — needs a scheduled job | **TTL** index — `expireAfterSeconds` |
+| Failure mode when misused | Full table scan | `COLLSCAN`, or an in-memory sort that fails past 32MB |
+| Check if it's used | `EXPLAIN` | `.explain('executionStats')` → `IXSCAN` vs `COLLSCAN` |
+
+**The one-line answer if asked "how do Mongo and SQL indexes differ":** *"Mechanically the same — a B-tree with the same read/write tradeoff. The differences follow from the data model: SQL indexes scalar columns in normalized tables with leftmost-prefix ordering; MongoDB indexes fields inside documents, including whole arrays natively via multikey indexes, and orders compound fields by ESR instead."*
+
+## Creating an index — side by side
+
+```sql
+-- SQL
+CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_name ON users(last_name, first_name);   -- leftmost-prefix
+DROP INDEX idx_users_email ON users;
+SHOW INDEX FROM users;
+EXPLAIN SELECT * FROM users WHERE email = 'a@mail.com';
+```
+
+```js
+// MongoDB
+db.users.createIndex({ email: 1 });
+db.users.createIndex({ email: 1 }, { unique: true });
+db.orders.createIndex({ status: 1, createdAt: -1 });            // ESR
+db.users.dropIndex('email_1');
+db.users.getIndexes();
+db.users.find({ email: 'a@mail.com' }).explain('executionStats');
+```
+
+> **The syntax difference that actually matters:** SQL indexes are DDL, declared **against the table** (`CREATE INDEX ... ON table`). Mongo has no separate DDL — indexes are just **driver calls against the collection** (`db.collection.createIndex(...)`, or `schema.index(...)` in Mongoose). That reflects the bigger difference: SQL has a formal schema language, Mongo doesn't.
+
+## Where "MySQL" fits into "SQL vs NoSQL"
+
+Easy to conflate these — they're not the same axis.
+
+- **SQL** = a *language standard* for querying relational data. Not software — you can't run "SQL" by itself.
+- **MySQL** = one specific *product* that implements SQL (Postgres, SQL Server, Oracle DB are others). It has its own syntax quirks:
+  ```sql
+  MySQL:    id INT AUTO_INCREMENT PRIMARY KEY;
+  Postgres: id SERIAL PRIMARY KEY;              -- same LIMIT clause, different auto-increment syntax
+  ```
+- **NoSQL** = everything that *isn't* the relational/SQL model — MongoDB (documents), Redis (key-value).
+
+**So "MySQL vs NoSQL" is really "one specific relational product vs an entire other family of databases."** The comparison that actually matters is the one from [08-sql-vs-nosql](../08-databases-sql-vs-nosql.md): schema rigidity, relationships, scaling, transactions — not MySQL specifically.
+
+### MySQL vs NoSQL — the decision, compressed
+
+| Ask yourself | MySQL | NoSQL (Mongo) |
+|---|---|---|
+| Can a half-finished write corrupt something (money, inventory)? | Yes → ACID | — |
+| Is the data naturally rows + relationships, or nested/variable-shaped? | Rows | Nested |
+| Will this shard across many machines? | Hard — JOINs/ACID don't survive sharding cleanly | Natural — designed for it |
+| Schema changing constantly right now? | Migration on every change | No migration needed |
+
+**In practice:** most systems run both — MySQL/Postgres for the transactional core, MongoDB/Redis alongside for catalogs, sessions, and scale ([08-sql-vs-nosql §10](../08-databases-sql-vs-nosql.md#usecases)).
+
+---
+
 <a name="interview"></a>
-# 11. Interview Questions & Answers
+# 12. Interview Questions & Answers
 
 ### Q1. Explain covered indexes.
 > "A covered query is one MongoDB answers **entirely from the index**, without ever opening the actual documents. It works when every field you search by *and* every field you ask for back are both in the index, and you exclude `_id` unless it's in there too.
@@ -571,10 +644,19 @@ orders.filter(o => o.userId)          // ⭐ populate returns null for missing r
 >
 > **Virtual populate is a different thing and genuinely useful** — it defines a reverse relationship so a user can have `posts` without storing an ever-growing array of ids in the user document, which would eventually hit the 16MB limit."
 
+### Q10. What's the actual difference between SQL and MySQL?
+> "SQL is a query language standard, not software — Postgres, MySQL, and SQL Server all speak it, each with their own extensions. MySQL is one specific product that implements SQL. So 'SQL vs MySQL' isn't a comparison of two things at the same level — it's the language versus one implementation of it. You can see it in small syntax differences: MySQL uses `AUTO_INCREMENT`, Postgres uses `SERIAL`, and the ANSI standard itself uses `FETCH FIRST n ROWS ONLY` where both of those use `LIMIT`."
+
+### Q11. MySQL vs NoSQL — how do you decide?
+> "I ask what happens if a write half-completes — if that could corrupt something like money or inventory, I want ACID, so MySQL. Then I look at the data shape: relational and row-like favors MySQL, nested and variable-shaped favors MongoDB. Then scale: MySQL scales up easily but sharding out is genuinely hard, because JOINs and ACID don't survive sharding cleanly, while MongoDB shards naturally since documents are self-contained. In practice most systems use both — MySQL for the transactional core, MongoDB or Redis alongside it for catalogs, sessions, and scale."
+
+### Q12. How do indexes differ between SQL and MongoDB, concretely?
+> "The data structure is identical — a B-tree with the same fundamental tradeoff: faster reads, slower writes, more storage, because every index is updated on every write. What differs follows from the data model. SQL's compound-index rule is leftmost-prefix; MongoDB's is ESR — equality, sort, range — because documents aren't normalized into columns the same way. MongoDB also has index types SQL doesn't really have: multikey indexes for array fields, and TTL indexes that auto-delete expired documents. Syntactically, SQL indexes are DDL against the table; Mongo indexes are just driver calls against the collection, because Mongo has no separate schema language."
+
 ---
 
 <a name="cheatsheet"></a>
-# 12. Cheat Sheet
+# 13. Cheat Sheet
 
 ### Schema design ⭐ (everything else follows from this)
 ```
@@ -676,6 +758,31 @@ BEST: ③ soft delete (deleted:true + pre-find filter) ⭐
       ① hooks — convenient, easily bypassed
 
 ALWAYS guard: orders.filter(o => o.userId)
+```
+
+### MongoDB vs SQL indexes ⭐
+```
+SAME structure (B-tree) · SAME tradeoff (faster reads, slower writes, more storage)
+
+SQL:   leftmost-prefix rule · clustered primary index · EXPLAIN · CREATE INDEX ON table
+Mongo: ESR rule (§4)        · _id is the default index · .explain() · createIndex ON collection
+
+Mongo-only index types: MULTIKEY (arrays) · TTL (auto-expire)
+SQL indexes = DDL (against the table) · Mongo indexes = driver calls (against the collection)
+
+SQL syntax:   CREATE INDEX idx ON users(email);
+Mongo syntax: db.users.createIndex({ email: 1 });
+```
+
+### SQL vs MySQL vs NoSQL — the terms, untangled ⭐
+```
+SQL      = a LANGUAGE STANDARD (not software) — Postgres/MySQL/SQL Server all speak it
+MySQL    = ONE PRODUCT that implements SQL, with its own syntax (AUTO_INCREMENT vs SERIAL)
+NoSQL    = everything NOT relational — MongoDB (documents), Redis (key-value)
+
+"MySQL vs NoSQL" = one relational product vs an entire other family of DBs
+   → decide on: ACID need? · rows vs nested data? · sharding? · schema churn?
+   → most real systems run BOTH (polyglot persistence, 08-sql-vs-nosql §10)
 ```
 
 ---

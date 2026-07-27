@@ -266,7 +266,28 @@ const results = await pipeline.exec();
 
 ## The common way: offset (and why it dies)
 
+**The formula behind "page 3" → `skip(40)`:**
+
+```
+offset = (page - 1) × pageSize
+limit  = pageSize
+```
+
+**Why `page - 1`:** pages are 1-indexed for a human ("page 1" is the first page), but offset is 0-indexed ("skip 0 records" to start at the very first one). Page 1 must skip nothing, so you subtract 1 before multiplying.
+
+```
+page 1, size 20  →  (1-1)×20 =  0   → skip 0,  take 20 → items 1–20
+page 2, size 20  →  (2-1)×20 = 20   → skip 20, take 20 → items 21–40
+page 3, size 20  →  (3-1)×20 = 40   → skip 40, take 20 → items 41–60
+```
+
+```sql
+-- SQL: LIMIT and OFFSET are separate keywords
+SELECT * FROM orders LIMIT :pageSize OFFSET :offset;   -- page 3 → LIMIT 20 OFFSET 40
+```
+
 ```js
+// Mongo/Mongoose: .skip() IS the offset, .limit() IS the pageSize
 // "skip the first 40 results, then give me 20" — page 3
 await Order.find().skip(40).limit(20);
 ```
@@ -460,6 +481,74 @@ for (const o of orders) {
 ```
 Each query takes 2ms, so nothing looks slow in isolation — but 101 × 2ms = 202ms. **You find it by counting queries per request, not by timing them.**
 
+## 6.1 ⭐ The full checklist — when the DATABASE specifically is slow
+
+The four causes above are the common ones. Here's the complete order to work through, since "the DB is slow" has more possible causes than just those.
+
+**① Did it happen suddenly, or creep up gradually?**
+Sudden = something changed — a deploy, a dropped index, a data migration. Gradual = data outgrew an assumption — most often a table that was small enough for a full scan to be "fast enough," and no longer is.
+
+**② Run the actual query through `EXPLAIN`.**
+```
+SQL:    "type": "ALL"        → full table scan, no index used
+Mongo:  "stage": "COLLSCAN"  → same thing
+```
+Still the single most common cause of "the database got slow."
+
+**③ Check the connection pool, not just the query itself.**
+A query can genuinely be fast and requests still queue because every request is waiting for a free connection:
+```
+pool size: 10   ·   concurrent requests: 200   →   190 are just waiting in line
+```
+**Tell:** query duration in the DB's own slow-query log looks fine, but latency measured from your app is much higher. That gap **is** queueing time — a different problem than a slow query, with a different fix (raise pool size, or find what's holding connections too long).
+
+**④ Look for locks / long-running transactions.**
+One forgotten `BEGIN` with no `COMMIT`, a bad migration, or an accidental table lock can make every other query wait behind it. Check `SHOW PROCESSLIST` (MySQL) or `db.currentOp()` (Mongo) for anything running suspiciously long.
+
+**⑤ N+1 queries** — covered above. Count queries per request, not their individual duration.
+
+**⑥ Cache hit rate dropped** — twice as many requests reaching the DB, with no code change, because a deploy changed a cache key or TTLs are too short (§2).
+
+**⑦ Replication lag, if reads go to a replica.**
+A lagging replica means either stale reads or a replica that's itself overloaded. This is its own metric — check it directly rather than inferring it from query time.
+
+**⑧ Disk I/O / CPU on the DB host itself.**
+If nothing above explains it, the machine may be resource-starved — commonly because indexes have grown too large to fit in RAM, so lookups that should be memory-speed are hitting disk instead ([Part 8 §3](08-mongodb-and-mongoose.md)).
+
+## 6.2 ⭐ The full checklist — when the API (or a downstream call) is slow
+
+**① Is the time inside your process, or downstream?** This is exactly the event-loop-lag fork above — high lag = your own code; normal lag = you're waiting on something else.
+
+**② If waiting, time the downstream call specifically — don't assume which one.**
+```
+total: 420ms
+  ├─ your handler logic:      15ms
+  ├─ DB query:                 30ms
+  └─ third-party payment API: 375ms   ← there it is
+```
+A tracing tool (or just manual `console.time` around each await, temporarily) turns "the API is slow" into "this ONE dependency is slow" — a completely different fix.
+
+**③ Thread-pool queueing** — normal lag, one endpoint slow, and it uses `fs`, `bcrypt`, or `zlib`. Invisible unless you know it's a separate queue from the event loop ([Part 2 §3](02-nodejs-internals.md)).
+
+**④ Payload size / serialization.** A response that quietly grew from 2KB to 200KB (a nested object added, field selection dropped) adds real transfer and `JSON.stringify` time on every single request — and no individual query got slower, so it's easy to miss.
+
+**⑤ Timeouts, retries, and circuit breakers.** If a downstream dependency is *failing*, not just slow, and there's no circuit breaker, every request can pay the full timeout before falling back. "The API is slow" can really mean "the API is failing slowly" — check the error rate alongside latency, not latency alone.
+
+## 6.3 The metrics worth actually watching
+
+Guessing which of the above applies is how you waste a day. These are the numbers that tell you directly:
+
+```
+Request latency (p50 / p95 / p99) — PER ENDPOINT, not averaged across all of them
+Error rate                        — slow AND failing is a different problem than just slow
+DB query time                     — separate from total request time
+Connection pool usage             — % in use, and queue depth
+Cache hit rate
+Event loop lag                    — distinguishes "my code" from "waiting"
+CPU / memory — on BOTH the app host and the DB host
+Queries per request               — catches N+1, which duration alone never will
+```
+
 ---
 
 <a name="leaks"></a>
@@ -592,6 +681,16 @@ Then, in DevTools, two things matter:
 >
 > To confirm, I'd take three heap snapshots: a baseline, one after exercising the suspect path a thousand times, and a third after forcing garbage collection. Anything still there in the third is genuinely held. Then the **Retainers panel** names what's holding it — and that's the line I fix."
 
+### Q8. Walk through your checklist when someone says "the database is slow."
+> "First, sudden or gradual — a sudden jump points at a deploy or a dropped index, a gradual slide points at data outgrowing an assumption. Then I run the actual query through `EXPLAIN` and check for a full scan — `COLLSCAN` in Mongo, `type: ALL` in SQL — since a missing index is still the most common cause.
+>
+> If the query itself is fast but requests are still slow, I check the **connection pool** — a query can be 2ms and a request can still take 200ms if it spent the rest of that time waiting for a free connection. Then I look for long-running locks or transactions blocking everything else, count queries per request to catch N+1, check whether the cache hit rate dropped, and if reads go to a replica, check replication lag directly rather than guessing. If none of that explains it, it's usually the DB host itself — CPU-starved, or indexes too big to fit in RAM so lookups are hitting disk."
+
+### Q9. Walk through your checklist when someone says "the API is slow."
+> "First question is always the event-loop-lag fork: is it my own code blocking the thread, or am I waiting on something? If I'm waiting, I time the downstream call specifically rather than assuming — a tracing waterfall usually shows one dependency eating almost all of the time, whether that's the DB, a cache, or a third-party API.
+>
+> Beyond that: thread-pool queueing if it's one endpoint using `fs`/`bcrypt`/`zlib` with normal lag; payload size, since a response that quietly grew adds real serialization time with no query getting slower; and error rate alongside latency, because a failing-but-not-erroring dependency with no circuit breaker means every request pays the full timeout before falling back — 'slow' can actually mean 'failing slowly.'"
+
 ---
 
 <a name="cheatsheet"></a>
@@ -674,6 +773,34 @@ ORDER: 1 which endpoint + when · 2 p50 or p99 · 3 LAG (the fork)
 
 N+1 = 1 query for the list + 1 per item = 101 queries
       each is fast → find it by COUNTING queries, not timing them
+      FIX: JOIN · populate/$lookup · batch with $in · denormalize the field
+```
+
+### DB slow — full checklist ⭐
+```
+1 sudden vs gradual        → deploy/dropped index vs data outgrew an assumption
+2 EXPLAIN                  → COLLSCAN / type:ALL = missing index (still #1 cause)
+3 CONNECTION POOL          → query fast but pool full = requests queue for a connection
+                              tell: DB log says fast, app-measured latency says slow
+4 LOCKS / long transactions → SHOW PROCESSLIST / db.currentOp()
+5 N+1                      → count queries per request
+6 CACHE HIT RATE dropped   → same code, twice the DB traffic
+7 REPLICATION LAG          → check directly if reads hit a replica
+8 DISK I/O / CPU on DB host → indexes too big for RAM = disk-speed lookups
+```
+
+### API slow — full checklist ⭐
+```
+1 event loop lag fork      → my code vs waiting (as above)
+2 TIME the downstream call → don't assume WHICH dependency — trace it
+3 thread-pool queueing     → fs/bcrypt/zlib, lag normal, one endpoint slow
+4 PAYLOAD SIZE             → response quietly grew → real serialization cost, no slow query
+5 error rate + timeouts    → failing-but-not-erroring dependency = "slow" really means
+                              "failing slowly" without a circuit breaker
+
+WATCH: latency (p50/p95/p99 PER endpoint) · error rate · DB query time ·
+       pool usage · cache hit rate · event loop lag · CPU/mem (app AND db) ·
+       queries per request
 ```
 
 ### Memory leaks (full: Part 2.8)

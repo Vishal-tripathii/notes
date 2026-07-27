@@ -185,6 +185,115 @@ async function refresh(token) {
 
 Store a **hash** of the refresh token, never the token itself — it's a credential, treat it like a password.
 
+## 5.1 ⭐ The full round trip — how the two tokens actually hand off, in real terms
+
+Everything above explains rotation. This is the **day-to-day mechanics** — where each token physically lives, what triggers a refresh, and the race condition that catches people out.
+
+```
+access token   15 min   sent with EVERY request        kept in memory (a JS variable)
+refresh token  7 days   sent ONLY to /auth/refresh      kept in an httpOnly cookie
+```
+
+### Step 1 — Login
+
+```
+POST /auth/login  { email, password }
+
+Response:
+  body:        { accessToken: "eyJ..." }                     ← frontend keeps this in memory
+  Set-Cookie:  refreshToken=abc123; HttpOnly; Secure;
+               Path=/auth/refresh                             ← browser stores this
+```
+
+> ⚠️ **Common misreading: "the refresh token never reaches the frontend, it's DB-only."** Wrong — `Set-Cookie` **is** the token being sent to the client. The browser stores it, on the user's machine, same as any cookie. `httpOnly` only means **your JavaScript** can't read it (`document.cookie` won't show it) — the browser still holds it and resends it automatically. The DB never stores this raw value at all; see below.
+>
+> **`Path=/auth/refresh`** means the browser only attaches this cookie when calling that one endpoint — not on every request. The sensitive token travels as rarely as possible.
+
+### Step 2 — Why the DB only ever sees a hash
+
+```
+BROWSER cookie jar:   refreshToken = "abc123"           ← the raw, real token
+DATABASE:             tokenHash    = sha256("abc123")   ← a hash, not the raw value
+```
+
+Same reasoning as bcrypt for passwords (§1): the DB is the thing that can leak — a backup exposure, an injection bug, an insider. If it stored the raw token, a leak hands out working sessions for every user. Storing only a hash means a DB leak gives an attacker nothing they can present back to `/auth/refresh` — exactly like leaking password hashes doesn't hand out working passwords.
+
+### Step 3 — Normal requests, for 15 minutes
+
+```js
+let accessToken = "eyJ...";   // in memory — NOT localStorage
+fetch('/api/orders', { headers: { Authorization: `Bearer ${accessToken}` } });
+```
+Server verifies with `jwt.verify()` — pure math, no DB hit, ~0ms.
+
+### Step 4 — The access token expires → a 401 is the trigger
+
+The frontend doesn't run a timer. It reacts to the first `401` it sees:
+
+```js
+axios.interceptors.response.use(
+  res => res,
+  async (error) => {
+    if (error.response?.status === 401 && !error.config._retried) {
+      error.config._retried = true;
+      accessToken = await getValidToken();               // see §5.1 race fix below
+      error.config.headers.Authorization = `Bearer ${accessToken}`;
+      return axios(error.config);                         // retry the original request
+    }
+    return Promise.reject(error);
+  }
+);
+
+async function refreshAccessToken() {
+  // no Authorization header needed — the browser attaches the
+  // httpOnly refresh cookie automatically for this one path
+  const { data } = await axios.post('/auth/refresh', {}, { withCredentials: true });
+  return data.accessToken;
+}
+```
+
+**The user never notices.** One request silently became two — fail, refresh, retry.
+
+### Step 5 — What `/auth/refresh` does server-side
+
+```
+1. read refreshToken from the cookie
+2. hash it, look up that hash in the DB
+3. valid + unused → mark used, issue a NEW access token + NEW refresh token (rotation, §5)
+4. Set-Cookie: refreshToken=NEW_VALUE   ← the old one is now dead
+```
+
+This repeats roughly every 15 minutes for up to 7 days — a "logged in for a week" session is really ~672 silent refreshes the user never sees. When the refresh token itself finally expires, the next refresh fails and the user is sent back to a real login.
+
+### Step 6 — Logout
+
+```
+POST /auth/logout
+  → DELETE the refresh token's row from the DB    ← real revocation
+  → Set-Cookie: refreshToken=; Max-Age=0           ← clears the browser's copy
+  → frontend discards the in-memory access token
+```
+
+This is *why* the refresh token has to be server-side rather than just a longer-lived JWT — deleting a row is genuine revocation. The access token can't be revoked, but it's dead within 15 minutes regardless.
+
+## 5.2 ⚠️ The race condition rotation creates
+
+If a page fires several API calls at once and the access token happens to be expired, naive code triggers **multiple simultaneous refresh calls**. With rotation, only the *first* succeeds — the others present a refresh token that's already been marked used, which looks identical to theft (§5) and can wrongly revoke the whole session.
+
+**Fix: one shared in-flight refresh promise, so concurrent callers await the same call instead of racing.**
+
+```js
+let refreshPromise = null;
+
+async function getValidToken() {
+  if (isExpired(accessToken)) {
+    refreshPromise ??= refreshAccessToken().finally(() => { refreshPromise = null; });
+    accessToken = await refreshPromise;   // every caller shares ONE refresh call
+  }
+  return accessToken;
+}
+```
+
 ---
 
 <a name="oauth"></a>
@@ -540,6 +649,16 @@ Sessions get genuinely hard — cross-region replication adds latency and consis
 ### Q9. Why do users get randomly logged out after you add a second server?
 > "In-memory sessions. Each server has its own memory, so a session created on Server 1 doesn't exist on Server 2, and the load balancer round-robins. Users fail roughly `(N-1)/N` of requests. The fix is a **shared store** — Redis — which makes the servers stateless. Sticky sessions also 'work' but break deploys and autoscaling. Same bug appears with `cluster` on a single machine."
 
+### Q10. Is the refresh token ever sent to the frontend, or does it just live in the database?
+> "It's genuinely sent to the client — the `Set-Cookie` header at login **is** that delivery. The browser stores it like any cookie; `httpOnly` only means my JavaScript can't read it, not that the browser doesn't have it. The browser still attaches it automatically on the next call to `/auth/refresh`.
+>
+> What the database holds is different: a **hash** of that token, never the raw value — same reasoning as bcrypt for passwords. If the DB leaks, an attacker gets hashes they can't present back to the server, not working sessions. So there are two real copies: the raw token in the browser's cookie jar, and a one-way hash of it server-side for lookup."
+
+### Q11. What race condition does refresh token rotation create, and how do you fix it?
+> "If several requests fire at once with an expired access token, naive code kicks off a separate refresh call for each. With rotation, only the first one succeeds — the rest present a refresh token that's already marked used, which looks exactly like theft and can wrongly revoke the whole session.
+>
+> The fix is a single shared in-flight promise: the first caller starts the refresh, and every other caller just awaits that same promise instead of starting its own. One refresh call services all of them."
+
 ---
 
 <a name="cheatsheet"></a>
@@ -591,8 +710,14 @@ sameSite → lax (default, right) | strict (safest, email links log out) | none 
 ```
 JWT = signed, NOT encrypted → anyone can read the payload
       cannot be revoked → short expiry + refresh token
-access 15m (every request)  ·  refresh 7d (only /refresh, stored HASHED)
+access 15m (every request, in-memory JS var)
+refresh 7d (only /auth/refresh, httpOnly cookie, Path-scoped)
 ROTATION → each use issues a new one; a reused token = THEFT → revoke the family
+
+⭐ refresh token IS sent to the client (Set-Cookie) — httpOnly just blocks JS reads
+   DB stores only sha256(token), never the raw value — same reasoning as bcrypt
+⚠️ concurrent requests + expired token → race: multiple refresh calls collide with
+   rotation → fix with ONE shared in-flight refresh promise, not per-caller refreshes
 ```
 
 ### Attacks
