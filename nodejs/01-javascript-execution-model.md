@@ -43,7 +43,7 @@
 11. [The two queues](#queues) ⭐
 12. [What actually blocks](#blocking)
 13. [Concurrency vs parallelism](#conc)
-14. [Escaping the single thread](#escape)
+14. [Escaping the single thread — Workers](#escape)
 
 **Part C**
 
@@ -98,7 +98,9 @@ Here's the thing to actually remember. Creating a context happens in **two passe
 
 ## What it is
 
-The call stack is how JavaScript keeps track of **where it currently is**. When you call a function, it goes on top of the stack. When that function returns, it comes off. Whatever's on top is what's running right now.
+The call stack is how JavaScript keeps track of **where it currently is** — which function is running right now, and where to return when it finishes.
+
+It's a **stack**, so it's **LIFO — Last In, First Out**. Picture a stack of plates: you add to the top, you take from the top. Every time you **call** a function, JavaScript **pushes a frame** onto the top — that frame is the function's execution context from §1: its arguments, its local variables, and the address to return to. When the function **returns**, its frame is **popped** off. **Whatever's on top is what's executing right now.**
 
 ```js
 function first()  { second(); console.log('first done'); }
@@ -107,7 +109,7 @@ function third()  { console.log('third done'); }
 first();
 ```
 
-Watch the stack:
+Watch the stack push and pop:
 
 ```
  call first()      first calls       second calls      third returns,
@@ -120,20 +122,59 @@ Watch the stack:
  └─────────┘       └─────────┘       └─────────┘       └─────────┘
 ```
 
-Output: `third done` → `second done` → `first done`. The innermost call finishes first, because nothing above it can return until it does.
+Output: `third done` → `second done` → `first done`. **The innermost call finishes first** — nothing below it on the stack can return until the frame above it pops. Each paused frame just sits there, remembering exactly where to resume.
 
-## The two things that matter
+## Only ONE stack
 
-**① There is only ONE stack.** JavaScript does one thing at a time. There's no "meanwhile, over here" — if the stack is busy, everything else waits. This is the fact the entire second half of this note is built on.
+**JavaScript has exactly one call stack**, so it does one thing at a time — it's single-threaded by nature. There's no "meanwhile, over here"; if the stack is busy, everything else waits. This single fact is what the entire second half of this note — the event loop, async — is built on.
 
-**② Too many frames and it breaks:**
+## Stack overflow (the favorite follow-up)
+
+The stack has a **finite size**. If functions keep pushing frames without popping — the classic case being **recursion with no base case** — it fills up and you get:
+
 ```js
-function boom() { return boom(); }   // calls itself forever, never returns
-// RangeError: Maximum call stack size exceeded
+function boom() {
+  boom();          // calls itself forever, never returns
+}
+boom();            // ❌ RangeError: Maximum call stack size exceeded
 ```
-The stack has room for roughly 11,000 frames. Infinite recursion fills it. Note this is a **normal error you can catch** — it's about how *deep* your calls go, not how much data you have.
 
-> 💡 **Where this leads:** one stack means one thing at a time. So what happens when your code has to wait 500ms for a database? If it just sat there, the entire server would freeze. That question is §9.
+Each `boom()` pushes a new frame; none ever pop → overflow. Room is finite — roughly 11,000 frames. It's about how **deep** your calls go, not how much data you hold, and it's a **normal, catchable error**. (The site *Stack Overflow* is literally named after this.)
+
+> 💡 **The related follow-up — stack vs heap:** the *stack* holds frames and primitives and tracks execution order; the *heap* is the unstructured memory where **objects** live. Variables on the stack hold **references** that point into the heap. That's why a returned function can keep an object alive after its frame is gone — see §4.
+
+## How it connects to async / the event loop
+
+This is the part interviewers really want. Since there's **one** call stack, JS can't just "wait" on a slow task — a timer, an API call — because that would **block** the stack and freeze the page. So async work is handled **off** the stack:
+
+```
+Call Stack ──(hands off async task)──▶ Web / Node APIs (timer, fetch, I/O)
+                                              │  when done, the callback is queued
+                                              ▼
+                                        Callback / Microtask Queue
+                                              │
+     Event Loop: "is the call stack EMPTY? → push the next queued callback"
+```
+
+The event loop's whole job: **when the stack is empty, take the next callback from the queue and push it on.** So async callbacks never run while something is on the stack — which is exactly why `setTimeout(fn, 0)` still runs *after* your current synchronous code. The full mechanism — who does the waiting, and the two queues — is §9–11.
+
+## Interview one-liner
+
+> "The call stack is a LIFO structure the engine uses to track function execution — calling a function pushes a frame, returning pops it, and the top frame is what's running. There's a **single** stack, so JavaScript does one thing at a time; long-running work blocks it, which is why async tasks are offloaded and their callbacks are pushed back on only once the stack is empty. Exceed the size limit — usually infinite recursion — and you get a stack overflow."
+
+## Quick Q&A to expect
+
+### Q: Why is JavaScript single-threaded?
+> "Because it has one call stack — one thing at a time. The upside is no locks and no race conditions (§8); the downside is CPU-heavy work blocks everything (§12)."
+
+### Q: What causes a stack overflow?
+> "Too many frames pushed without returning — almost always recursion with no base case. It's about call *depth*, not data size, and it's a catchable `RangeError`."
+
+### Q: How does async work if there's only one stack?
+> "The slow work is offloaded to libuv or the OS, so the stack doesn't wait. When it finishes, the callback is queued, and the **event loop pushes it back onto the stack only once the stack is empty** — which is why `setTimeout(fn, 0)` still runs after your current synchronous code (§9–11)."
+
+### Q: Stack vs heap?
+> "The stack holds function frames and primitives and tracks execution order; the heap is unstructured memory where objects live. Stack variables hold references pointing into the heap — which is what lets a closure keep an object alive after its frame pops (§4)."
 
 ---
 
@@ -511,6 +552,27 @@ Because the event loop can never interrupt code that's running (§10), your func
 
 > ⭐ **You trade the ability to use multiple cores for a guarantee of sanity: no locks, no race conditions, ever.** That's the deal.
 
+## Interview one-liner
+
+> "A thread is a worker with one call stack, so single-threaded means one thing at a time and multi-threaded means several at once across CPU cores. Multi-threading gives you parallelism but also shared-memory race conditions that need locks; single-threading gives up multi-core execution but eliminates that whole class of bugs — no locks, no races. Node's **JavaScript execution** is single-threaded, which is why it's simple and safe, but the **runtime** isn't: libuv uses a thread pool and the OS to do the waiting off-thread. So it's **single-threaded execution on a multi-threaded runtime** — ideal for I/O-bound work, weak for CPU-bound work."
+
+## Q&A to expect
+
+### Q: Is Node single-threaded?
+> "The JavaScript execution is — one call stack, one thing at a time. The runtime isn't: libuv has a 4-thread pool and the OS handles network waiting (§9). The line to say is 'single-threaded execution, multi-threaded runtime.'"
+
+### Q: Why is single-threaded a good thing?
+> "No shared-memory race conditions and no locks, so a whole class of random production bugs simply can't exist, and the code is simpler. And for I/O-bound servers you don't need threads anyway, because the waiting is offloaded off-thread."
+
+### Q: What's the downside of single-threaded?
+> "You can't use multiple CPU cores for your JavaScript, and one CPU-heavy task blocks the entire process — every other user freezes until it finishes (§12)."
+
+### Q: How does Node do many things at once then?
+> "Concurrency, not parallelism (§13) — it interleaves many *waiting* tasks on one thread, and the actual I/O waiting happens off-thread in libuv or the OS. It handles thousands of connections at once but doesn't *compute* many at once."
+
+### Q: How do you get true parallelism in Node?
+> "`worker_threads` to move CPU-heavy work off the main thread, or `cluster` to run one process per core for more throughput (§14). Cluster divides blocking damage rather than fixing it."
+
 ---
 
 <a name="paradox"></a>
@@ -744,6 +806,27 @@ console.log('B');
 
 **`await` doesn't block the thread.** It hands control back to the event loop and schedules the rest of the function as a microtask. That's why other requests keep being served while you `await`.
 
+## Interview one-liner
+
+> "JavaScript runs on one thread with one call stack, so it can't sit and wait on slow work. When you call something async, Node hands it to libuv or the OS and keeps executing; when that work finishes its callback is queued, and the event loop's job is to push the next queued callback onto the stack — but **only once the stack is empty**, because it can never interrupt running code. That's why synchronous code always finishes first and `setTimeout(0)` runs after it. There are two queues with strict priority: **microtasks** — promises and `await` — which drain completely, and **macrotasks** — timers and I/O — taken one at a time, so a promise callback always beats a `setTimeout(0)` scheduled at the same moment."
+
+## Q&A to expect
+
+### Q: What is the event loop?
+> "The mechanism that pushes queued callbacks onto the call stack when it's empty, letting a single thread handle async work without waiting. It hands slow work off (§9), then runs the resulting callbacks later in priority order (§11)."
+
+### Q: Can the event loop interrupt running code?
+> "No. Synchronous code always runs to completion and empties the stack before any callback fires. That's the rule everything depends on — and it's why CPU-heavy work freezes everything (§12)."
+
+### Q: What order do `setTimeout` and `Promise.then` run in?
+> "The promise wins. `.then` is a microtask, and microtasks drain completely before any macrotask like `setTimeout` runs — even a `setTimeout(0)` scheduled first. Priority is: sync → `process.nextTick` → microtasks → macrotasks."
+
+### Q: Does `await` block the thread?
+> "No. `await` is a `.then()` boundary — it schedules the rest of the function as a microtask and yields control back to the loop, so other work keeps being served while you wait."
+
+### Q: Why can Node handle ~10,000 connections on one thread?
+> "Because those connections are mostly *waiting* on I/O, and the waiting happens off-thread in libuv or the OS (§9). Waiting is nearly free; only *computing* runs on your thread and blocks. Node is built for I/O-bound work, not CPU-bound work."
+
 ---
 
 <a name="blocking"></a>
@@ -795,16 +878,113 @@ PARALLELISM:          doing many things at the same instant
 ---
 
 <a name="escape"></a>
-# 14. Escaping the single thread
+# 14. Escaping the single thread — Workers
 
-### `worker_threads` — for computing
+## Why workers exist
+
+One thread means **CPU-heavy work blocks everything** — you can't offload *computation* the way you offload I/O, because there's no OS to hand it to; it's your code that has to run.
+- **Browser:** heavy compute freezes the **UI** — no clicks, no scroll, no render.
+- **Node:** heavy compute blocks the **event loop** — every other request freezes.
+
+**Workers are the escape hatch: run JavaScript on a *separate thread*, in parallel, so the main thread stays free.**
+
+## How workers work — the model
+
+A worker is a **separate thread with its own memory and its own global scope**, running a separate script. The core design point:
+
+> **Workers don't share memory with the main thread. They communicate by *message passing*.**
+
+```
+   MAIN THREAD                              WORKER THREAD
+   ┌────────────────┐   postMessage(data)   ┌────────────────┐
+   │ your app / UI  │ ────────────────────▶ │ heavy compute  │
+   │                │                        │ (own memory,   │
+   │  onmessage  ◀──┼──────────────────────  │  own globals)  │
+   └────────────────┘   postMessage(result)  └────────────────┘
+        stays free                            does the CPU work
+```
+
+Key mechanics:
+- Communication is **`postMessage` / `onmessage`** — asynchronous.
+- Data is **copied**, not shared, via the **structured clone** algorithm → no shared-mutable-state, so **no race conditions** (same safety guarantee as the single-thread model, §8).
+- **No shared scope:** a worker can't touch the main thread's variables, and in the browser **can't touch the DOM** (no `window`/`document`). Pure computation in, result out.
+
+## The three "workers" (know the distinction — common trap)
+
+| | **Web Worker** | **Worker Thread** | **Service Worker** |
+|---|---|---|---|
+| Where | Browser | Node.js (`worker_threads`) | Browser |
+| Purpose | Offload CPU work | Offload CPU work | **Not** CPU — a network **proxy** for caching / offline / push |
+| DOM access | ❌ | ❌ | ❌ |
+
+⚠️ **Service Workers are the odd one out** — not for parallel computation; they sit between app and network for offline/PWA caching. If "worker" comes up for *performance*, it means **Web Workers** (browser) or **worker_threads** (Node).
+
 ```js
-const w = new Worker('./heavy.js');
+// Browser Web Worker
+const worker = new Worker('worker.js');
+worker.postMessage({ numbers: bigArray });
+worker.onmessage = (e) => console.log('result:', e.data);
+// worker.js:  onmessage = (e) => postMessage(heavyCompute(e.data.numbers));
+```
+
+## `worker_threads` — for computing (Node)
+```js
+const { Worker } = require('worker_threads');
+const w = new Worker('./heavy.js', { workerData: bigArray });
 w.on('message', result => res.json(result));   // main thread stays free ✅
+// heavy.js:
+//   const { parentPort, workerData } = require('worker_threads');
+//   parentPort.postMessage(heavyCompute(workerData));
 ```
 A real thread with **its own memory** — nothing shared unless you explicitly ask, so you still don't get race conditions. Use it when one heavy task would otherwise freeze the loop: PDF generation, image processing, big data transforms.
 
-### `cluster` — for throughput
+## A real example — and how the worker "talks back"
+
+An Express route that does heavy CPU work **without freezing the server**:
+
+```js
+// main.js
+const { Worker } = require('worker_threads');
+
+app.get('/heavy', (req, res) => {
+  const worker = new Worker('./heavy.js', { workerData: 45 });
+
+  // 👇 register a listener, then MOVE ON — the main thread does not block here
+  worker.on('message', (result) => res.json({ result }));   // runs LATER
+  worker.on('error',   (err)    => res.status(500).json({ error: err.message }));
+});
+
+app.get('/ping', (req, res) => res.send('still responsive!')); // works during /heavy
+```
+```js
+// heavy.js — runs on its OWN thread
+const { parentPort, workerData } = require('worker_threads');
+const fib = (n) => (n < 2 ? n : fib(n - 1) + fib(n - 2));
+parentPort.postMessage(fib(workerData));   // 👈 send the answer back to main
+```
+
+**"Is the main thread listening to the worker?" — yes, but *listening* means it registered a callback, not that it's blocked waiting.** The worker doesn't "return" a value; it **emits a message**, and the main thread reacts to it as an event through the **same event loop** you already know (§9–11):
+
+```
+MAIN THREAD                                  WORKER THREAD
+worker.on('message', cb)  ← register, then CONTINUE serving other requests
+   │                                         fib(45) runs here (slow, this thread only)
+   │                                         parentPort.postMessage(result)
+   ▼                                                    │
+event loop: 'message' event arrives ◀───────────────────┘
+   → pushes cb onto the stack when empty → cb(result) → res.json(...)
+```
+
+- `worker.on('message', cb)` **registers a callback and returns immediately** — the main thread never pauses.
+- `parentPort.postMessage(...)` delivers a **message event** to the main thread's event loop, which runs `cb` when the main stack is empty — exactly like a `setTimeout` or I/O callback firing.
+
+**It's two-way**, both directions just `postMessage` + an `on('message')` listener:
+- **Main → worker:** initial `workerData`, or later `worker.postMessage(x)` (worker listens via `parentPort.on('message', …)`).
+- **Worker → main:** `parentPort.postMessage(result)` (main listens via `worker.on('message', …)`).
+
+> One line: **the worker doesn't return a value — it emits a message, and the main thread reacts to it as an event through the event loop, exactly like any other async callback.**
+
+## `cluster` — for throughput
 ```js
 if (cluster.isPrimary) {
   for (let i = 0; i < os.cpus().length; i++) cluster.fork();
@@ -818,7 +998,60 @@ Runs **N copies of your whole app**, one per CPU core, sharing a port. Use it to
 >
 > And because each worker is a separate process with separate memory, **your app must be stateless** — sessions have to live in Redis, not in a variable.
 
-**The rule:** one endpoint freezing everyone → **worker_threads**. Need more requests per second → **cluster**.
+## `worker_threads` vs `cluster` vs `child_process`
+- **`worker_threads`** — threads sharing one process; for **CPU work**. Lightweight.
+- **`cluster`** — one **process per core** for **throughput** (more req/sec), not for offloading a single heavy task.
+- **`child_process` / `fork`** — separate **processes** (own memory); heavier, for running separate programs/scripts.
+
+> **The rule:** one endpoint freezing everyone → **worker_threads**. Need more requests per second → **cluster**. Run a separate program → **child_process**.
+
+## Sharing data — the escape hatches
+- **`SharedArrayBuffer` + `Atomics`** — the *one* way to genuinely **share memory** (not copy) between threads. Fast for large numeric data, but you're back to needing `Atomics` to avoid races. Rarely needed.
+- **Transferable objects** — instead of copying a big `ArrayBuffer`, **transfer ownership** (zero-copy). Fast, but the sender loses access to it.
+
+## Benefits
+1. **Keeps the main thread responsive** — UI stays smooth / event loop stays free.
+2. **True parallelism** — actually uses multiple CPU cores (the one thing plain JS can't do).
+3. **Safety preserved** — memory is copied, not shared, so no race conditions by default.
+
+## Use cases
+- **Browser:** image/video processing, canvas filters, parsing large JSON/CSV, encryption/hashing, physics/simulations — anything that would jank the UI.
+- **Node:** PDF generation, image resizing/thumbnails, CPU-bound transforms, compression, heavy hashing.
+
+> **The rule:** workers are for **CPU-bound** work. **Not** for I/O — I/O is already async and off-thread, so wrapping a DB call in a worker just adds overhead.
+
+## Trade-offs / limitations (pros & cons)
+| Pros | Cons |
+|---|---|
+| Main thread stays responsive | **Spawn cost** — thread startup + memory (use a **worker pool**) |
+| True multi-core parallelism | **Message-passing cost** — data serialized/copied (structured clone); huge payloads can cost more than they save |
+| No race conditions (copied memory) | **No shared state** — must architect around messages |
+| | **No DOM** in the browser — compute only |
+| | Added complexity, harder debugging |
+
+## Interview one-liner
+
+> "JavaScript is single-threaded, so CPU-heavy work blocks the main thread — the UI in the browser or the event loop in Node. Workers run a script on a separate thread in parallel so the main thread stays responsive. They don't share memory; they communicate through asynchronous message passing with `postMessage`, and data is copied via structured clone, which keeps the no-race-condition guarantee. In the browser they're Web Workers with no DOM access, and in Node they're worker_threads. They're for CPU-bound work like image processing or heavy computation, not for I/O, which is already async. The main costs are thread spawn overhead and serializing data across the boundary, which you manage with a worker pool and, when needed, SharedArrayBuffer for zero-copy sharing."
+
+## Q&A to expect
+
+### Q: Why do we need workers if JS is single-threaded?
+> "To run CPU-heavy work off the main thread so the UI or event loop doesn't freeze — it's the one case you can't offload via async I/O, because computation has to actually run somewhere."
+
+### Q: Do workers share memory with the main thread?
+> "No, by default — they message-pass and data is copied via structured clone, which is why there are no race conditions. `SharedArrayBuffer` is the deliberate exception for zero-copy sharing, and then you need `Atomics`."
+
+### Q: Can a Web Worker access the DOM?
+> "No — it has no `window` or `document`. It computes and posts results back for the main thread to render."
+
+### Q: Web Worker vs Service Worker?
+> "Web Worker = parallel CPU work. Service Worker = a network proxy for caching, offline, and push. Same 'worker' name, completely different jobs."
+
+### Q: worker_threads vs cluster vs child_process?
+> "worker_threads = threads in one process for CPU work; cluster = one process per core for throughput; child_process = separate processes for running separate programs."
+
+### Q: When would workers *hurt* performance?
+> "For light tasks or I/O — the spawn and serialization overhead exceeds the benefit. Also when you copy huge payloads across the boundary, where the messaging cost outweighs the computation saved."
 
 ---
 

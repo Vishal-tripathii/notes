@@ -67,6 +67,24 @@ So a memory leak's first symptom isn't running out of RAM — it's **latency get
   FILES / CRYPTO / ZLIB                 ──▶  handed to the THREAD POOL (4 threads)
 ```
 
+## How V8 and libuv fit together — the handoff
+
+V8 knows nothing about files or networks (§1), so the instant your JS hits async work, the call crosses Node's C++ bindings into libuv, which does the waiting off the main thread and hands the result back:
+
+```
+1. V8 runs your JS on the main thread
+2. JS calls fs.readFile(...) / a DB query   → crosses C++ bindings into libuv
+3. libuv does the work OFF the main thread  → OS for network, pool thread for files
+4. V8 keeps running the rest of your JS — never waits   ← this is "non-blocking"
+5. work finishes → libuv queues the callback
+6. the event loop pushes the callback onto V8's stack once it's empty
+7. V8 runs the callback
+```
+
+> **The subtle bit:** the **event loop itself runs on the main thread** — the same thread as V8. Only the *waiting* happens elsewhere (OS or pool), so "the event loop is a separate thread" is a myth.
+
+> **One-liner:** *"V8 runs the code; the moment it hits async work, libuv takes the waiting off-thread — the OS for network with zero threads, or the 4-thread pool for files and crypto — then hands the result back to V8 through the event loop, so V8 never sits idle."*
+
 ---
 
 <a name="pool"></a>
@@ -132,6 +150,29 @@ The OS *is* the bell system. Node says *"tell me when any of these 10,000 connec
 **Why this is the whole ballgame:** holding 10,000 idle connections costs Node essentially nothing — no threads, no per-connection memory, no CPU. A thread-per-request server would need 10,000 threads and gigabytes of stack space to do the same.
 
 **And why files are the exception:** the OS offers no equivalent *"ring me when this file is ready"* mechanism. So libuv fakes it with a blocking read on a pool thread. **That is the entire reason the thread pool exists.**
+
+## Blocking vs non-blocking — the contrast
+
+Everything above is **non-blocking**: work is handed to libuv and the main thread keeps going. **Blocking** is the opposite — the work runs on the main thread and nothing else can happen until it finishes:
+
+```js
+// NON-BLOCKING — handed to libuv, main thread stays free
+fs.readFile('big.txt', (err, data) => { /* runs later */ });
+console.log('runs FIRST');                  // ✅ main thread kept going
+
+// BLOCKING — runs on the main thread, freezes everything
+const data = fs.readFileSync('big.txt');    // ❌ V8 stops here until done
+console.log('waited');
+```
+
+| | Non-blocking (`readFile`) | Blocking (`readFileSync`) |
+|---|---|---|
+| Who does the work | libuv, off-thread | the main thread itself |
+| Main thread | free ✅ | frozen ❌ |
+| Result delivered via | event loop callback | return value (after the wait) |
+| In a server | always | never (fine only at startup) |
+
+> ⚠️ **CPU work blocks too**, even though it isn't I/O — a huge loop or `JSON.parse` runs on V8's thread with nothing to hand off, so it freezes the loop exactly like `readFileSync`. That's the worker_threads case (§6).
 
 ---
 

@@ -261,6 +261,49 @@ const failed  = results.filter(r => r.status === 'rejected');
 const img = await Promise.any([fetch(cdn1), fetch(cdn2), fetch(cdn3)]);
 ```
 
+### `all` vs `allSettled` — what you actually get back ⭐
+
+The return **shape** is the detail people miss. `all` gives you a plain array of values; `allSettled` gives you an array of **outcome objects**.
+
+```js
+// Promise.all → array of RESOLVED VALUES, in input order (NOT completion order)
+const [user, orders, notifs] = await Promise.all([
+  getUser(id),        // 'U'
+  getOrders(id),      // 'O'
+  getNotifications(id) // 'N'
+]);
+// → ['U', 'O', 'N']   ✅ all succeeded
+
+// ...but if ANY rejects, the whole thing rejects and you get NONE of the values:
+try {
+  await Promise.all([
+    getUser(id),                       // succeeds
+    Promise.reject(new Error('orders down')), // fails
+  ]);
+} catch (e) {
+  // ❌ e = Error('orders down')  — the successful getUser result is LOST
+}
+```
+
+```js
+// Promise.allSettled → array of OUTCOME OBJECTS, never rejects
+const outcomes = await Promise.allSettled([
+  getUser(id),                          // succeeds
+  Promise.reject(new Error('orders down')), // fails
+]);
+// → [
+//     { status: 'fulfilled', value: 'U' },
+//     { status: 'rejected',  reason: Error('orders down') },
+//   ]
+
+// so you split successes from failures yourself:
+const ok     = outcomes.filter(o => o.status === 'fulfilled').map(o => o.value);
+const failed = outcomes.filter(o => o.status === 'rejected').map(o => o.reason);
+// ok → ['U'],  failed → [Error('orders down')]
+```
+
+> **The shape to memorize:** `all` → `[v1, v2, …]` (or it throws). `allSettled` → `[{status:'fulfilled', value}, {status:'rejected', reason}, …]` (never throws). `value` on success, `reason` on failure.
+
 > ⚠️ **`Promise.all` rejects on the first failure — but it does NOT cancel the others.** They keep running and their results are discarded. **If one was writing to your database, that write still happens.**
 
 ---
