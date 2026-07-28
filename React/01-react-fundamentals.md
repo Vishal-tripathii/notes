@@ -1,10 +1,10 @@
 # React Study Notes — Part 1
 
-## React Fundamentals (React Basics: What, Why, SPA/MPA, Declarative, Components, JSX, Data Flow, Architecture)
+## React Fundamentals (What, Why, SPA/MPA, Declarative, Components, JSX, Data Flow, Architecture, react-dom)
 
-> **Format:** Written as **conceptual "how it works"** notes with the 14-question framework in mind (what / why / how internally / when / trade-offs / mistakes / interview Q / quick revision). Diagrams included. Fresh-start friendly.
+> **Format:** Conceptual **"how it works"** notes, written fresh-start friendly — every term translated, nothing assumed. Follows the 14-question framework (what / why / how internally / when to use / when to avoid / pros / cons / performance / common mistakes / interview Qs / code examples / advanced / quick revision).
 >
-> **Roadmap:** Part 1 → React Basics. Next sub-topics in Part 1: Components (functional/class/controlled…) and JSX (rules, fragments, conditional rendering, keys).
+> **Continues:** Part 1 → React Basics. Next: **JSX deep-dive** (rules, fragments, conditional rendering, lists & `key`), then **Components** (functional vs class, controlled vs uncontrolled), then **Props & State**.
 
 ---
 
@@ -18,233 +18,732 @@
 6. [JSX (overview)](#jsx)
 7. [One-Way Data Flow](#dataflow)
 8. [React Architecture Overview](#architecture)
-9. [Interview questions & answers](#interview)
-10. [Quick revision cheat sheet](#cheatsheet)
+9. [How react-dom actually paints (walkthrough)](#reactdom)
+10. [Interview questions & answers](#interview)
+11. [Quick revision cheat sheet](#cheatsheet)
 
 ---
 
 <a name="what"></a>
 # 1. What is React?
 
-**React is a JavaScript *library* for building user interfaces** — component-based UIs that stay in sync with your data.
+**React is a JavaScript library for building user interfaces.**
 
-- Created by **Facebook (Meta)**, 2013, open source. Powers Facebook, Instagram, Netflix, WhatsApp Web.
-- Concerns only the **view layer** (the "V" in MVC). Its one job: **render UI and keep it in sync with your data.**
+Break the sentence down:
 
-## Library, not framework (interview point)
-A **framework** (Angular) gives everything out of the box and dictates structure — routing, state, HTTP, forms. React does **only UI**; you assemble the rest: **React Router** (routing), **Redux/Zustand** (state), **fetch/Axios/React Query** (data). Tradeoff: more freedom & flexibility, but more decisions.
+- **JavaScript library** — just a `.js` package you install. Not a language, not a framework. *You* call *its* functions.
+- **User interfaces** — the visible part: buttons, lists, forms, modals. React does **not** do databases, servers, or business logic.
 
-> One-liner: *"React is a declarative, component-based JavaScript library for building UIs, maintained by Meta. It handles the view layer and keeps the UI in sync with state efficiently via a Virtual DOM."*
+**The one job React does:** keep what's on screen **in sync** with your data.
+
+```
+your data  ────►  React  ────►  what the user sees
+(state)                          (real DOM / screen)
+
+data changes ────► React re-renders ────► screen updates automatically
+```
+
+You change the data; React changes the screen. You never touch the screen yourself.
+
+- Created by **Facebook (Meta)**, **2013**, open source. Powers Facebook, Instagram, Netflix, WhatsApp Web.
+- Concerns only the **view layer** (the "V" in MVC).
+
+## Library, not framework (classic interview point)
+
+| | **Framework** (Angular) | **Library** (React) |
+|---|---|---|
+| Gives you | routing, forms, HTTP, state — everything | only the UI layer |
+| Who's in charge | the framework calls your code | you call React |
+| You must choose | nothing | router, state manager, data fetching |
+
+React deliberately does **only the view**. You bolt on the rest:
+- routing → **React Router**
+- global state → **Redux / Zustand / Context**
+- server data → **fetch / Axios / React Query**
+
+**Trade-off:** more freedom, more decisions. Two React codebases can look completely different.
+
+> **One-liner:** *"React is a declarative, component-based JavaScript library for building UIs, built by Meta in 2013. It handles the view layer and keeps the UI in sync with state efficiently using a Virtual DOM."*
 
 ---
 
 <a name="why"></a>
 # 2. Why React?
 
-**The problem it solves:** with plain JS you **manually manipulate the DOM** on every data change → keeping UI in sync is error-prone spaghetti as the app grows.
+## Life before React — manual DOM manipulation
 
-**Advantages (why it won):**
-1. **Declarative** — describe *what* the UI should be; React handles DOM updates → fewer "UI out of sync" bugs.
-2. **Component-based** — reusable, composable pieces.
-3. **Virtual DOM** — efficient updates; computes the *minimal* real-DOM changes.
-4. **One-way data flow** — predictable, debuggable.
-5. **Huge ecosystem + community + jobs** — the practical winner; backed by Meta.
-6. **"Learn once, write anywhere"** — web (`react-dom`) and mobile (`react-native`) share the mental model.
+Say a cart count appears in three places. With plain JavaScript:
 
-> The winning combo: **Virtual DOM** (performance without manual DOM work) + **component composability** + Meta's backing.
+```js
+// user adds an item — now YOU must update every place it appears
+cart.push(item);
+document.getElementById("cart-count").textContent   = cart.length;
+document.getElementById("header-badge").textContent = cart.length;
+document.getElementById("checkout-total").textContent = getTotal(cart);
+if (cart.length > 0) document.getElementById("empty-msg").style.display = "none";
+```
+
+The problems:
+1. **You** must remember every place that data appears. Miss one → the UI is wrong ("out of sync" bug).
+2. As features grow, this becomes untraceable spaghetti — dozens of DOM pokes per action.
+3. The data lives in one place, the truth on screen lives in another, and **nothing guarantees they match**.
+
+## With React
+
+```jsx
+<span>Cart: {cart.length}</span>
+```
+
+Change `cart` → every place that reads `cart` updates itself. **You describe the UI once; React does the syncing.**
+
+## The 6 reasons React won
+
+1. **Declarative** — describe *what* it should look like, not *how* to change it → a whole class of sync bugs disappears.
+2. **Component-based** — build once, reuse everywhere.
+3. **Virtual DOM** — fast, minimal updates without hand-optimizing.
+4. **One-way data flow** — data moves in one direction, so bugs are traceable.
+5. **Ecosystem + jobs** — biggest community, backed by Meta.
+6. **"Learn once, write anywhere"** — same mental model for web (`react-dom`) and mobile (`react-native`).
+
+> The killer combo: **Virtual DOM** (speed without effort) + **components** (reuse) + **Meta's backing** (trust).
 
 ---
 
 <a name="spa-mpa"></a>
 # 3. SPA vs MPA
 
-## MPA (Multi-Page Application) — traditional
-Every navigation fetches a **whole new HTML page** from the server → **full page reload**.
-```
-click link → browser requests /about → server sends full about.html → FULL RELOAD
-```
-Each URL = a separate HTML document the server builds (classic PHP, Rails, WordPress).
+This is about **what happens when you click a link**.
 
-## SPA (Single-Page Application) — the React model
-Browser loads **one** HTML page + a JS bundle **once**; then **JavaScript takes over**. Navigation **swaps content on the fly**, updates the URL via the History API, and fetches only **data (JSON)** as needed.
+## MPA — Multi-Page Application (traditional)
+
+Every page is a separate HTML document built by the server.
+
 ```
-load index.html + JS bundle ONCE
-click "About"   → JS swaps content, updates URL → NO reload
-click "Contact" → JS swaps content, fetches JSON if needed → NO reload
+click "About"
+   ↓
+browser asks server for /about
+   ↓
+server builds & sends a WHOLE new HTML page
+   ↓
+browser THROWS AWAY the current page, renders the new one
+   ↓
+⚪ white flash — FULL PAGE RELOAD
 ```
+
+Everything resets: JS state gone, scroll position gone, CSS/JS re-parsed.
+Examples: WordPress, classic PHP, Rails, Django.
+
+## SPA — Single-Page Application (the React model)
+
+The browser downloads **one** HTML shell + a JS bundle **once**. After that, JavaScript runs the show.
+
+```
+first visit
+   ↓
+download index.html (nearly empty!) + bundle.js   ← slow-ish, happens ONCE
+   ↓
+React takes over, renders the page
+   ↓
+click "About"
+   ↓
+NO server page request. React swaps the content in place.
+URL updated via the History API (so back/forward still work)
+   ↓
+needs data? → fetches JSON only (a few KB), not a whole page
+```
+
+The HTML file is basically empty:
+
+```html
+<body>
+  <div id="root"></div>       <!-- React fills this -->
+  <script src="bundle.js"></script>
+</body>
+```
+
+## Comparison
 
 | | **MPA** | **SPA (React)** |
 |---|---|---|
-| Navigation | Full reload, new HTML each time | JS swaps content, no reload |
-| Server sends | Full HTML per page | HTML once, then JSON data |
-| Feel | Traditional website | Fast, app-like, smooth |
-| First load | Faster (small HTML) | Slower (big JS bundle) |
-| SEO | Easy (full HTML from server) | Harder (content built client-side) |
-| Server load | Higher (renders every page) | Lower (renders data only) |
+| Navigation | full reload, white flash | instant, no flash |
+| First load | fast (small HTML) | slower (big JS bundle) |
+| Later navigation | slow (full page each time) | fast (JSON only) |
+| Server sends | full HTML per page | HTML once, then JSON |
+| Server load | high (renders every page) | low (serves data) |
+| SEO | great by default | weak by default — needs SSR |
+| Feels like | a website | an app |
 
-- **SPA pros:** fast navigation, app-like UX, less server load, clean frontend ↔ API split.
-- **SPA cons:** heavier initial JS download, **SEO challenges** (crawler may see an empty shell), needs client-side routing.
+**The core trade-off:** an SPA pays a **slower first load** to buy **instant everything afterwards**. That's why Gmail, Figma and Netflix are SPAs — but a blog or news site often isn't.
 
-> Nuance (→ Part 15): **SSR / Next.js** blurs the line — SPA smoothness *plus* server-rendered HTML for SEO + fast first paint. "SPA vs MPA" evolves into "CSR vs SSR."
+**The SEO problem, plainly:** a crawler that doesn't execute JavaScript sees `<div id="root"></div>` — an empty page.
+
+> **Nuance (→ Part on SSR/CSR):** **SSR / Next.js** blurs the line — server-rendered HTML for SEO and fast first paint, *plus* SPA smoothness after hydration. "SPA vs MPA" evolves into "CSR vs SSR."
 
 ---
 
 <a name="declarative"></a>
 # 4. Declarative vs Imperative
 
-- **Imperative** = step-by-step instructions on ***how*** to reach the result; you manually command each change.
-- **Declarative** = **describe *what*** the end result should be; the system figures out how.
+The single biggest mental shift when learning React.
+
+**Analogy — getting to a restaurant:**
+- **Imperative** = turn-by-turn directions: *"go 200m, turn left, right at the lights, park behind the building."* You specify every **step**.
+- **Declarative** = the destination: *"take me to Domino's."* You specify the **outcome**; someone else works out the steps.
+
+React is the second one.
+
+## In code
+
+**Imperative (vanilla JS)** — you write every step:
 
 ```js
-// IMPERATIVE (vanilla JS) — command every DOM step
-const li = document.createElement("li");
-li.textContent = "New item";
-document.querySelector("#list").appendChild(li);
-```
-```jsx
-// DECLARATIVE (React) — describe what the UI IS for the current data
-function List({ items }) {
-  return <ul>{items.map(i => <li key={i.id}>{i.text}</li>)}</ul>;
-}
-```
-You never say "create an `li` and append it" — you say *"the list is these items"*, and when `items` changes React updates the DOM to match.
+const btn = document.createElement("button");
+btn.textContent = "Add";
+btn.className = "primary";
+btn.addEventListener("click", handleAdd);
+document.body.appendChild(btn);
 
-> Analogy: imperative = **turn-by-turn directions**; declarative = **give the destination**, GPS finds the route. Basis of **`UI = f(state)`** — your UI is a function of your state.
+// later, when loading starts:
+btn.disabled = true;
+btn.className = "primary disabled";
+btn.textContent = "Adding...";
+```
+
+**Declarative (React)** — you write the destination:
+
+```jsx
+<button className={loading ? "primary disabled" : "primary"} disabled={loading}>
+  {loading ? "Adding..." : "Add"}
+</button>
+```
+
+You never wrote "change the text", "add the class", "set disabled". You described **what it should be when `loading` is true** — React figures out the DOM edits.
+
+## Why it matters practically
+
+| | **Imperative** | **Declarative** |
+|---|---|---|
+| You manage | every *transition* between states | just the *states* themselves |
+| Typical bug | "I forgot to reset the class on the error path" | mostly disappears |
+| Reading code | replay the steps mentally to know the UI | look at it — the UI is right there |
+
+**The formula that carries everything:**
+
+```
+UI = f(state)
+```
+
+The UI is a **function of state**. Same state in → same screen out. Change the state, get a new screen. You never mutate the screen directly.
 
 ---
 
 <a name="components"></a>
 # 5. Component-Based Architecture
 
-React apps are built from **components**: independent, reusable, composable pieces of UI. Each is **self-contained** (own structure, logic, optional state) and returns a piece of UI.
+**A component is a reusable, self-contained piece of UI.** In modern React it's just a **function that returns UI**.
+
+```jsx
+function Button({ label }) {
+  return <button className="btn">{label}</button>;
+}
+```
+
+Used like a custom HTML tag:
+
+```jsx
+<Button label="Save" />
+<Button label="Cancel" />
+```
+
+> **Analogy:** Lego bricks. Small pieces (Button, Input, Avatar) snap into bigger pieces (LoginForm, Navbar), which snap into pages.
+
+## Composition — the component tree
+
+A real app is a **tree**:
+
 ```
         App
-       / | \
-  Header Main Footer
-          |
-    ┌─────┴─────┐
-  Sidebar    ProductList
-                 |
-             ProductCard  (reused many times)
+         │
+   ┌─────┼──────┐
+Navbar  Feed   Footer
+         │
+    ┌────┴────┐
+  Post      Post          ← same component, different data
+    │
+ ┌──┴───┐
+Avatar LikeButton
 ```
-Build big UIs by **nesting small components** (composition), like functions calling functions.
 
-**Benefits:** reusability · maintainability (fix once, fixed everywhere) · separation of concerns · testability · team scaling.
+Each component:
+- has its **own logic and its own look**,
+- can hold its **own state**,
+- can be **reused** anywhere,
+- can be **tested in isolation**.
 
-> Analogy: **Lego blocks** snap into anything. An app = a **tree of components**, `App` at the root.
+## Two rules that make components work
+
+**1. Names must be Capitalized.**
+`<button>` = real HTML button. `<Button>` = your component. That's literally how JSX tells them apart — lowercase compiles to the string `"button"`, capitalized compiles to a reference to your function. A lowercase component name renders as an unknown HTML tag and shows nothing.
+
+**2. Components must be pure-ish** — same props in, same UI out. No surprise side effects during render.
+
+## Why this beats one big file
+
+| One giant HTML/JS file | Components |
+|---|---|
+| copy-paste the same card 20 times | write `<Card />` once, use 20 times |
+| fix a bug in 20 places | fix in 1 place |
+| everything can touch everything | each piece is isolated |
+| impossible to test a part | test `Button` on its own |
+
+**Benefits:** reusability · maintainability · separation of concerns · testability · team scaling.
 
 ---
 
 <a name="jsx"></a>
-# 6. JSX (overview — full rules in the dedicated JSX topic)
+# 6. JSX (overview — full rules in the JSX deep-dive)
 
-**JSX** = syntax extension to write **HTML-like markup inside JavaScript**.
+**JSX is HTML-looking syntax written inside JavaScript.**
+
 ```jsx
-const element = <h1 className="title">Hello!</h1>;
+const el = <h1 className="title">Hello, {name}</h1>;
 ```
-- **Not HTML, not magic** — Babel compiles it to plain JS:
-  ```js
-  React.createElement("h1", { className: "title" }, "Hello!")
-  ```
-- That call returns a **React element** — a plain JS object *describing* UI (not a real DOM node yet).
-- **Optional** (you could hand-write `createElement`) but universally used for readability.
-- Embed JS with `{ }`: `<p>Count: {count}</p>`.
 
-> For now: **JSX is a readable syntax for building the tree of description-objects React turns into DOM.** Ties to `UI = f(state)`.
+## The single most important fact about JSX
+
+**The browser cannot read JSX.** It is not HTML and not valid JavaScript. A build tool (Babel / Vite / SWC) **compiles it away** before it ever reaches the browser.
+
+```jsx
+// what you write
+<h1 className="title">Hello</h1>
+
+// what it compiles to
+React.createElement("h1", { className: "title" }, "Hello")
+
+// what that function RETURNS — a plain JavaScript object
+{
+  type: "h1",
+  props: { className: "title", children: "Hello" }
+}
+```
+
+That plain object is called a **React element**. This is the foundation of everything else:
+
+> **JSX → `createElement()` → plain JS objects → that tree of objects IS the Virtual DOM.**
+
+When people say "Virtual DOM", they mean *this tree of lightweight JS objects describing the UI*. Cheap to create, cheap to compare — which is exactly why React can diff two versions fast.
+
+So JSX is **syntax sugar** — pure convenience. You *could* hand-write `createElement` calls; nobody wants to.
+
+## The rules (and why each exists)
+
+| Rule | Reason |
+|---|---|
+| `className` not `class` | `class` is a reserved word in JS |
+| `htmlFor` not `for` | `for` is a JS loop keyword |
+| `onClick` not `onclick` (camelCase) | it's a JS object property, not an HTML attribute |
+| Must return **one** root element | a function returns one value → wrap in a `<div>` or a **Fragment** `<>...</>` |
+| Every tag must close: `<img />`, `<br />` | it compiles to function calls — they need an explicit end |
+| `{ }` to embed JavaScript | anything inside `{}` is evaluated as a JS **expression** |
+
+## `{ }` holds expressions, not statements
+
+```jsx
+{ user.name }              ✅ expression
+{ 2 + 2 }                  ✅
+{ items.map(...) }         ✅ returns a value
+{ cond ? <A/> : <B/> }     ✅ ternary IS an expression
+{ if (cond) { ... } }      ❌ if-statements are NOT expressions
+```
+
+That's exactly **why** React code is full of ternaries and `&&` — you can't put an `if` inside JSX, so you use expressions that produce a value.
 
 ---
 
 <a name="dataflow"></a>
 # 7. One-Way Data Flow
 
-Data flows **one direction: top → down**, parent → child, via **props**.
-```
-   [Parent]  owns the state (data)
-      │  passes data DOWN via props
-      ▼
-   [Child]   receives props (read-only), displays them
-      │  to change parent's data → calls a callback passed down
-      ▲
-      └──── "actions up"
-```
-- Parent passes data **down** as props.
-- Child **cannot** modify the parent's data directly; the parent passes a **callback** down, the child **calls it**, the parent updates its own state.
-- Motto: **"Data down, actions up."**
+**Data flows down the tree, parent → child. Never sideways, never up.**
 
-**Why:** **predictability.** Data flows one way, so you always know where data comes from (its owner above) and where it changes (only its owner) → easy to trace bugs. Contrast **two-way binding** (Angular), where data and UI update each other and cause-and-effect gets murky.
+```
+        App          state lives here: user = "Vishal"
+         │
+         │  props (down) ↓
+      Navbar
+         │  props (down) ↓
+      Avatar          receives user, can only READ it
+```
 
-> Interview phrasing: *"React enforces unidirectional data flow — state lives in a parent and flows down through props; children request changes by invoking callbacks, giving a single source of truth and predictable updates."*
+- A parent passes data to a child via **props**.
+- Props are **read-only**. A child must never modify what it received.
+- A sibling cannot hand data to another sibling directly.
+
+## "But my child needs to change the data!"
+
+It doesn't change it. The parent passes down a **function**; the child **calls** it; the parent updates its own state — and the new value flows back down as a prop.
+
+```jsx
+function Parent() {
+  const [count, setCount] = useState(0);
+  //         data ↓            behaviour ↓
+  return <Child count={count} onIncrement={() => setCount(count + 1)} />;
+}
+
+function Child({ count, onIncrement }) {
+  // Child does NOT own count. It just asks: "please increment."
+  return <button onClick={onIncrement}>{count}</button>;
+}
+```
+
+```
+Parent ──── count (data) ────►  Child
+Parent ──── onIncrement ─────►  Child
+   ▲                              │
+   └──── child CALLS it ──────────┘   "an event happened"
+
+then Parent updates state → new count flows DOWN again
+```
+
+**Motto: "Data down, actions up."**
+Moving state to the nearest common parent so two components can share it is called **lifting state up**.
+
+## Why enforce one direction?
+
+Because when the UI is wrong you can **trace it**. There's exactly one path a value could have taken to reach the screen — walk up the tree and you find its owner. With two-way binding (old Angular), A changes B while B changes A, and cause-and-effect becomes unfollowable.
+
+**The cost:** **prop drilling** — threading a prop through 5 components that don't care about it just to reach the 6th. Fixes (later parts): **Context API**, **Redux / Zustand**.
+
+> **Interview phrasing:** *"React enforces unidirectional data flow — state lives in a parent and flows down through props; children request changes by invoking callbacks. That gives a single source of truth and predictable, traceable updates."*
 
 ---
 
 <a name="architecture"></a>
 # 8. React Architecture Overview
 
-How the pieces connect into one pipeline:
-```
-  You write COMPONENTS (functions)  ──return──▶  JSX
-        │                                          │ (Babel compiles)
-        │                                          ▼
-     STATE + PROPS feed in                 React ELEMENTS (Virtual DOM = plain-object tree)
-        │                                          │
-        └──── state changes → re-run components ──▶│
-                                                   ▼
-                                        RECONCILIATION (diff new tree vs old)
-                                                   │
-                                                   ▼
-                                   react-dom COMMITS minimal changes → REAL DOM → browser paints
-```
-Core concepts (the map):
-- **Components** — functions returning UI (§5).
-- **Props & State** — data in; state = a component's own data (next parts).
-- **JSX** — how you describe UI (§6).
-- **Virtual DOM + Reconciliation** — efficient real-DOM updates (Parts 5 & 6).
-- **One-way data flow** — how data moves (§7).
+Everything above, connected into one picture:
 
-**Platform-agnostic (interview note):** the `react` package holds the core (components, elements, reconciliation); a separate **renderer** does the output — `react-dom` (browser), `react-native` (mobile). Same brain, different hands.
+```
+        YOU WRITE                    BUILD STEP                RUNTIME
+┌──────────────────────┐      ┌────────────────────┐   ┌──────────────────┐
+│  Components (JSX)    │ ───► │ Babel/Vite compiles│──►│ createElement()  │
+│  + state             │      │ JSX away           │   │ calls run        │
+└──────────────────────┘      └────────────────────┘   └────────┬─────────┘
+                                                                │
+                                                                ▼
+                                                    ┌───────────────────────┐
+                                                    │  VIRTUAL DOM          │
+                                                    │  tree of plain JS     │
+                                                    │  objects {type,props} │
+                                                    └───────────┬───────────┘
+                                                                │
+                        state changes → build a NEW tree        │
+                                                                ▼
+                                                    ┌───────────────────────┐
+                                                    │  RECONCILIATION       │
+                                                    │  diff old vs new tree │
+                                                    │  → minimal change list│
+                                                    └───────────┬───────────┘
+                                                                │
+                                                                ▼
+                                                    ┌───────────────────────┐
+                                                    │  react-dom            │
+                                                    │  applies ONLY those   │
+                                                    │  changes to real DOM  │
+                                                    └───────────────────────┘
+```
 
-> Whole thing in one sentence: **You write components (functions) that describe the UI as a function of state using JSX; React builds a virtual tree, diffs it when state changes, and efficiently updates the real DOM — declaratively, data flowing one way.**
+## The update cycle in words
+
+1. Something happens — a click, a fetch resolves.
+2. You call `setState` → React marks that component as needing re-render.
+3. React **re-runs the component function** → produces a **new** Virtual DOM tree.
+4. React **diffs** new tree vs old tree — **reconciliation**.
+5. React computes the **minimum set of real DOM operations**.
+6. `react-dom` applies just those. Everything untouched stays untouched.
+
+## Why the Virtual DOM is fast (the honest version)
+
+Not because JS objects are magic — because **real DOM operations are expensive**. Touching the real DOM can trigger layout recalculation and repaint. Comparing two plain JS objects is cheap.
+
+> ⚠️ **Interview nuance:** the Virtual DOM is **not** "faster than hand-written DOM code." Perfectly hand-optimized imperative code will always beat it, because diffing is extra work. The VDOM's real win is that you get **near-optimal updates for free** while writing simple declarative code.
+
+## The two packages
+
+| Package | Job |
+|---|---|
+| `react` | components, hooks, elements, diffing — **platform-agnostic** (the brain) |
+| `react-dom` | actually touches the browser DOM — **the renderer** (the hands) |
+
+Swap the renderer and the same React knowledge targets other platforms: `react-native` (mobile), `react-three-fiber` (3D). **That** is what "learn once, write anywhere" actually means.
+
+> **Whole thing in one sentence:** *You write components that describe the UI as a function of state using JSX; React builds a virtual tree, diffs it when state changes, and the renderer efficiently patches the real DOM — declaratively, with data flowing one way.*
+
+---
+
+<a name="reactdom"></a>
+# 9. How react-dom actually paints (full walkthrough)
+
+Follow one tiny app all the way to pixels.
+
+```jsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div className="box">
+      <h1>Count: {count}</h1>
+      <button onClick={() => setCount(count + 1)}>+1</button>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<Counter />);
+```
+
+The HTML file is just `<div id="root"></div>` — completely empty.
+
+## Phase 1 — First render (mount)
+
+**Step 1 — JSX is already gone.** Before the browser sees your code, the build tool compiled it:
+
+```js
+React.createElement("div", { className: "box" },
+  React.createElement("h1", null, "Count: ", 0),
+  React.createElement("button", { onClick: fn }, "+1")
+)
+```
+
+**Step 2 — those calls return plain objects** (the Virtual DOM — nothing more):
+
+```js
+{
+  type: "div",
+  props: {
+    className: "box",
+    children: [
+      { type: "h1",     props: { children: ["Count: ", 0] } },
+      { type: "button", props: { onClick: fn, children: "+1" } }
+    ]
+  }
+}
+```
+
+**No DOM involved yet.** This is just a *description* sitting in memory.
+
+**Step 3 — `react-dom` reads the description and builds real DOM nodes:**
+
+```js
+document.createElement("div")     → div.className   = "box"
+document.createElement("h1")      → h1.textContent  = "Count: 0"
+document.createElement("button")  → button.textContent = "+1"
+// stitch them together, then ONE insertion:
+root.appendChild(div)
+```
+
+React builds the whole subtree **detached from the page**, then attaches it in a **single** operation. One insert, not three.
+
+**Step 4 — the browser paints.** The moment the DOM changed:
+
+```
+DOM changed → Style   (which CSS applies?)
+            → Layout  (where & how big is everything?)
+            → Paint   (draw pixels)
+            → Composite (put layers on screen)
+```
+
+Screen shows `Count: 0` and a button.
+
+## Phase 2 — You click `+1`
+
+**Step 1 — `setCount(1)` runs.** React does **not** touch the DOM. It marks `Counter` as dirty and schedules work.
+
+**Step 2 — React re-runs your function.** `Counter()` executes again with `count = 1`, producing a **brand new** object tree:
+
+```js
+{ type: "div", props: { className: "box", children: [
+    { type: "h1",     props: { children: ["Count: ", 1] } },   // ← 0 became 1
+    { type: "button", props: { onClick: fn, children: "+1" } }
+]}}
+```
+
+> 🔑 **The thing beginners get wrong: re-render ≠ repaint.** "Re-render" means *the function ran and produced a new description.* Still **zero DOM operations** at this point.
+
+**Step 3 — reconciliation (the diff).** React walks old vs new, side by side:
+
+```
+old                              new                     verdict
+──────────────────────────────────────────────────────────────────────
+div.box            vs   div.box                  same type, same props → SKIP
+  h1 "Count: 0"    vs     h1 "Count: 1"          same type, TEXT DIFFERS → PATCH
+  button "+1"      vs     button "+1"            identical → SKIP
+```
+
+Result: a change list with exactly **one** entry.
+
+**Step 4 — `react-dom` applies only that:**
+
+```js
+h1TextNode.nodeValue = "Count: 1";   // literally the only DOM write
+```
+
+The `<div>` is untouched. The `<button>` is untouched — not recreated, so it doesn't lose focus, and anything typed elsewhere isn't wiped.
+
+**Step 5 — the browser repaints.** Because only a text node changed, the browser can often do a small repaint instead of laying out the whole page again.
+
+## The whole trip in one diagram
+
+```
+   click
+     │
+     ▼
+setCount(1)                    ← no DOM touched
+     │
+     ▼
+Counter() re-runs              ← no DOM touched   ("re-render")
+     │
+     ▼
+new VDOM tree (plain objects)  ← no DOM touched
+     │
+     ▼
+diff old vs new  ──────────────► change list: [ h1 text: "0" → "1" ]
+     │
+     ▼
+react-dom: h1.nodeValue = "Count: 1"    ← THE ONLY REAL DOM WRITE
+     │
+     ▼
+browser: Style → Layout → Paint → Composite
+     │
+     ▼
+   pixels
+```
+
+## Why bother with the middle steps?
+
+| | Naive vanilla JS | React |
+|---|---|---|
+| Approach | `root.innerHTML = ...` — rebuild everything | patch one text node |
+| DOM nodes destroyed | all 3 | 0 |
+| Button loses focus / state | yes | no |
+| Layout cost | full re-layout | minimal |
+
+React spends a little cheap JavaScript work (diffing) to avoid expensive DOM work. That's the entire bargain.
+
+## Three takeaways
+
+1. **`react` decides *what* changed; `react-dom` decides *how* to apply it.** That split is why the same components can render to mobile — swap the renderer, keep the brain.
+2. **Re-render ≠ repaint.** Your component function running is cheap and normal. Only the diff *result* reaches the DOM.
+3. **React never rebuilds the page — it surgically edits.** Untouched nodes keep their identity, so focus, scroll position and CSS transitions all survive.
 
 ---
 
 <a name="interview"></a>
-# 9. Interview questions & answers
+# 10. Interview questions & answers
 
 ### Q: "Is React a library or a framework?"
-> *"A library. It handles only the view layer — rendering UI and keeping it in sync with state. It doesn't prescribe routing, global state, or data fetching; you add React Router, Redux or Zustand, and a data layer yourself. That's more flexibility but more assembly, versus a full framework like Angular that ships all of it."*
+> *"A library. It handles only the view layer — routing, state management and data fetching come from separate packages you choose. Angular is a framework because it ships all of that and dictates your app's structure. The trade-off is flexibility versus decision fatigue."*
 
 ### Q: "What problem does React solve?"
-> *"Keeping the UI in sync with changing data. In plain JS you manually manipulate the DOM on every change, which is error-prone and hard to scale. React lets you declaratively describe the UI as a function of state, and it updates the DOM for you efficiently through a Virtual DOM."*
+> *"Keeping the UI in sync with changing data. In plain JS you manually manipulate the DOM on every change, so you have to remember every place a value appears — error-prone and unscalable. React lets you declaratively describe the UI as a function of state and updates the DOM for you, minimally, via the Virtual DOM."*
 
-### Q: "SPA vs MPA?"
-> *"An MPA loads a fresh full HTML page from the server on every navigation — full reloads. An SPA loads one HTML page and a JS bundle once, then JavaScript swaps the content on the fly and only fetches data, so navigation is instant and app-like. React builds SPAs. The tradeoff is a heavier initial load and weaker default SEO, which SSR or Next.js addresses."*
+### Q: "What is the Virtual DOM and why does React use it?"
+> *"The Virtual DOM is a lightweight in-memory tree of plain JavaScript objects that describes the UI. When state changes, React builds a new tree, diffs it against the previous one, and applies only the minimal set of changes to the real DOM. It's used because real DOM operations are expensive — they trigger layout and repaint — while comparing JS objects is cheap. You get near-optimal DOM updates without writing imperative update code."*
 
-### Q: "Declarative vs imperative — where does React sit?"
-> *"React is declarative. Imperative code gives step-by-step instructions on how to mutate the DOM; declarative code describes what the UI should look like for the current state and lets React work out the DOM changes. It's the destination-vs-turn-by-turn-directions distinction, and it's why React code is more readable and less bug-prone."*
+### Q: "Is the Virtual DOM always faster than direct DOM manipulation?"
+> *"No. Perfectly hand-written imperative DOM code will beat it, because diffing is extra work. React's value is consistently good updates while you write simple declarative code — it optimizes the common case so you don't have to."*
 
-### Q: "What is one-way data flow and why does it matter?"
-> *"Data flows down from parent to child through props, and children can't mutate parent data directly — they call callbacks the parent passed down, and the parent updates its own state. 'Data down, actions up.' It matters because it makes the app predictable: there's a single source of truth and you always know where data originates and where it can change, which makes debugging far easier than two-way binding."*
+### Q: "Declarative vs imperative — explain with an example."
+> *"Imperative means writing the steps: create the element, set its text, add a class, later remove it. Declarative means describing the result — `disabled={loading}` — and letting React work out the steps. The benefit is you only manage states, not transitions between states, which eliminates a whole class of 'I forgot to reset that' bugs."*
 
-### Q: "Walk me through React's architecture."
-> *"You write components — functions that return JSX. JSX compiles to createElement calls that produce React elements, a virtual tree. When state changes, React re-runs the affected components to get a new tree, reconciles it by diffing against the previous tree, and the renderer — react-dom in the browser — commits only the minimal changes to the real DOM. The core is platform-agnostic; the renderer decides the output target."*
+### Q: "What is JSX? Can browsers run it?"
+> *"JSX is HTML-like syntax inside JavaScript. Browsers cannot run it — a compiler like Babel transforms it into `React.createElement()` calls at build time, which return plain JavaScript objects. Those objects form the Virtual DOM. JSX is purely syntactic sugar that makes UI structure readable."*
+
+### Q: "Why `className` instead of `class`?"
+> *"Because JSX compiles to JavaScript and `class` is a reserved keyword. Same reason `for` becomes `htmlFor`. These are JavaScript object keys, not HTML attributes."*
+
+### Q: "Why must component names be capitalized?"
+> *"JSX uses casing to decide what to compile to. Lowercase becomes a string — a real DOM tag like `\"div\"`. Capitalized becomes a reference to your component function. A lowercase component name would be treated as an unknown HTML element and render nothing."*
+
+### Q: "What's one-way data flow, and how does a child update the parent?"
+> *"Data flows down from parent to child through read-only props. A child never mutates them — the parent passes down a callback, the child calls it to signal an event, and the parent updates its own state. The new value then flows back down. Moving state to the nearest common parent so siblings can share it is called lifting state up."*
+
+### Q: "SPA vs MPA — trade-offs?"
+> *"An MPA fetches a fresh HTML page from the server on every navigation, so the page fully reloads. An SPA loads one HTML shell and a JS bundle once, then swaps content client-side and fetches only JSON. SPAs have a slower first load and weaker default SEO, but every subsequent navigation is instant and server load is lower. SSR frameworks like Next.js exist to fix the first-load and SEO downsides."*
+
+### Q: "Walk me through what happens when I call setState."
+> *"React marks the component as needing a re-render — it doesn't touch the DOM. It re-runs the component function to produce a new Virtual DOM tree, diffs that against the previous tree, and produces a minimal change list. Then react-dom commits only those changes to the real DOM, and the browser runs style, layout, paint and composite. The important distinction is that a re-render is just the function running again — only the diff result reaches the DOM."*
+
+### Q: "What's the difference between `react` and `react-dom`?"
+> *"`react` is the platform-agnostic core — components, hooks, elements, reconciliation. `react-dom` is the renderer that actually manipulates browser DOM nodes. Because they're separate, the same core drives other renderers like react-native. React decides what changed; the renderer decides how to apply it."*
 
 ---
 
 <a name="cheatsheet"></a>
-# 10. Quick revision cheat sheet
+# 11. Quick revision cheat sheet
 
-- **React** = declarative, component-based JS **library** for UIs (view layer), by Meta.
-- **Why** = no manual DOM · reusable components · Virtual DOM performance · one-way flow · huge ecosystem.
-- **SPA** = one HTML load, JS swaps content (no reloads); **MPA** = full reload per page. React builds SPAs.
-- **Declarative** = describe *what* (React); **Imperative** = command *how* (vanilla JS). `UI = f(state)`.
-- **Component-based** = UI from reusable, composable pieces (Lego / tree).
-- **JSX** = HTML-like syntax → compiles to `React.createElement` → element objects.
-- **One-way data flow** = data down via props, actions up via callbacks → predictable.
-- **Architecture** = components + JSX → Virtual DOM → reconciliation → react-dom → real DOM.
-- **Library vs framework** · **`react` core vs `react-dom`/`react-native` renderer** — common interview one-liners.
+```
+REACT           = JS library for UIs. View layer only. Meta, 2013.
+CORE IDEA       = UI = f(state).  Change data → screen follows.
+LIBRARY vs FW   = React gives UI only; you pick router/state/http.
 
-### Next up (Part 1 continued)
-- **Components** — functional vs class, controlled vs uncontrolled, container vs presentational, composition vs inheritance.
-- **JSX deep-dive** — rules, expressions, fragments, conditional rendering, lists & keys.
+DECLARATIVE     = describe the destination, not the turns.
+IMPERATIVE      = you write every DOM step yourself.
 
-*— End of Part 1: React Fundamentals (React Basics) —*
+COMPONENT       = function that returns UI. MUST be Capitalized.
+                  Reusable, isolated, composable → forms a tree.
+
+JSX             = HTML-ish syntax in JS. Browsers CAN'T run it.
+                  Babel → React.createElement() → plain JS objects.
+                  class→className, for→htmlFor, onclick→onClick.
+                  ONE root element. All tags self-close. {} = expressions only.
+
+VIRTUAL DOM     = that tree of plain JS objects.
+                  Fast because real DOM ops are expensive, not because JS is magic.
+
+RECONCILIATION  = diff old VDOM vs new VDOM → minimal real DOM edits.
+
+RE-RENDER ≠ REPAINT
+                  re-render = your function ran again (cheap, no DOM)
+                  repaint   = browser drew pixels (only after a real DOM write)
+
+DATA FLOW       = one-way, parent → child, via read-only props.
+                  Child signals up by CALLING a callback prop.
+                  "Data down, actions up."
+                  Shared state → lift it to the common parent.
+                  Pain point: prop drilling → Context / Redux.
+
+SPA             = one HTML + JS bundle; JS handles navigation; fetches JSON.
+                  slow first load, instant after, weak SEO → fix with SSR.
+MPA             = server sends a full new page each click; full reload.
+
+PACKAGES        react     = components, hooks, diffing (platform-agnostic, the brain)
+                react-dom = the renderer that touches the browser DOM (the hands)
+                (swap renderer → react-native, react-three-fiber)
+
+THE PIPELINE
+JSX → createElement() → VDOM objects → diff → minimal DOM patch
+    → Style → Layout → Paint → Composite → pixels
+```
+
+**The three sentences that carry everything:**
+1. `UI = f(state)` — you describe, React updates.
+2. JSX is sugar for `createElement`, which returns plain objects — and those objects **are** the Virtual DOM.
+3. Data goes **down** as props, events come **up** as callbacks.
+
+---
+
+## Connects to
+
+- **Part 2 (next) — JSX deep-dive:** rules, fragments, conditional rendering, lists & `key`. `key` plugs directly into the reconciliation step in §9 — it tells React "same item, just moved" instead of "destroy and rebuild."
+- **Components deep-dive:** functional vs class, composition vs inheritance, controlled vs uncontrolled, container vs presentational.
+- **Props & State:** the data half of `UI = f(state)`.
+- **Rendering internals / Virtual DOM:** the full reconciliation and Fiber story that §8–§9 sketch.
+- **SSR / CSR:** the real answer to the SPA SEO and first-load problems in §3.
+- **State management:** the answer to prop drilling in §7.
+
+## Suggested next topics
+
+1. **JSX deep-dive** — recommended next; makes VDOM, reconciliation and `key` click.
+2. **Components** — functional vs class, controlled vs uncontrolled.
+3. **Props & State** — then straight into hooks.
+
+*— End of Part 1: React Fundamentals —*
