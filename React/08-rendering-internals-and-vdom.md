@@ -1,12 +1,12 @@
 # React Study Notes — Part 8
 
-## Rendering Internals & the Virtual DOM ⭐ (Element → VDOM → Fiber → Reconciliation → Diffing → Render → Commit → Paint)
+## Rendering Internals & the Virtual DOM (Element → VDOM → Fiber → Reconciliation → Diffing → Render → Commit → Paint)
 
-> **Format:** Conceptual **"how it works"** notes, fresh-start friendly. Built around a **single example traced step by step through the entire pipeline**, with definitions, before/after comparisons, interview Q&A and a cheat sheet.
+> **Format:** The first half traces **one concrete update through the entire pipeline**, step by step. The second half explains each mechanism properly — what it is, what problem it solved, what it costs — with code only where a snippet carries a point words can't.
 >
 > **Roadmap:** covers both "Part 5 — React Rendering Internals" and "Part 6 — Virtual DOM" (they are one story, so they're combined here).
 >
-> **Continues:** [Part 1 — Fundamentals](01-react-fundamentals.md) · [Part 2 — Components](02-components.md) · [Part 3 — JSX](03-jsx-deep-dive.md) · [Part 4 — Props](04-props.md) · [Part 5 — State](05-state.md) · [Part 6 — Lifecycle](06-lifecycle.md) · [Part 7 — Hooks](07-hooks.md).
+> **Continues:** [Part 1 — Fundamentals](01-react-fundamentals.md) · [Part 3 — JSX](03-jsx-deep-dive.md) · [Part 6 — Lifecycle](06-lifecycle.md) · [Part 7 — Hooks](07-hooks.md).
 
 ---
 
@@ -24,7 +24,7 @@
    - [Step 7 — Commit Phase](#step7)
    - [Step 8 — Browser Paint](#step8)
 3. [Rendering vs Re-rendering](#rerender)
-4. [Fiber Architecture (before & after)](#fiber)
+4. [Fiber Architecture](#fiber)
 5. [Scheduling](#scheduling)
 6. [Concurrent Rendering](#concurrent)
 7. [Real DOM vs Virtual DOM — the honest comparison](#comparison)
@@ -192,13 +192,6 @@ And what those calls **return** is plain objects:
 {
   type: "h1",
   props: { children: 1 }
-}
-```
-
-```js
-{
-  type: "button",
-  props: { onClick: fn, children: "Increment" }
 }
 ```
 
@@ -617,116 +610,64 @@ Because only a text node changed — not a size or position — the browser can 
 <a name="rerender"></a>
 # 3. Rendering vs Re-rendering
 
+## The distinction that causes the most confusion
+
 > **Render** — React calling your component function to obtain a description of the UI. It produces React Elements. **It does not touch the DOM.**
 
-This is the most misunderstood point in React, so state it plainly: **"re-render" means "React called your function again."** It does not mean anything appeared on screen.
+Almost every misconception about React performance comes from conflating three separate things that people casually call "rendering."
 
-```
-render   = your function ran, producing a new element tree     (cheap, no DOM)
-commit   = React applied differences to the real DOM           (expensive)
-paint    = the browser drew pixels                             (expensive)
-```
+**A render** is your function executing. It's a JavaScript function call that returns objects. Nothing appears, nothing changes, no browser work happens. **A commit** is React applying differences to the real DOM — this is where actual mutation occurs. **A paint** is the browser drawing pixels, which only happens if the commit changed something the browser needs to redraw.
 
-## Initial render
+The gap between the first and the last is where the confusion lives. A component can re-render fifty times and cause **zero** DOM operations, because each render produced an identical element tree and the diff found nothing to do. The cost was fifty function calls and fifty comparisons — measured in microseconds, invisible to a user.
 
-```
-Counter()
-    ↓
-React Elements
-    ↓
-Fiber tree built from scratch
-    ↓
-DOM nodes CREATED
-    ↓
-appended in ONE insertion
-```
+This is why "unnecessary re-renders" is a much less alarming phrase than it sounds, and why chasing every one of them in DevTools without profiling is one of the most common wastes of effort in React work.
 
-There is no previous tree, so nothing to diff — every node is a "Placement."
+## The three things that trigger a render — and the things that don't
 
-## Re-render
+There are exactly three causes. **Initial mount**, when `createRoot(...).render()` first runs. **A state update** in that component, via `setState` or `dispatch`. And **a parent re-rendering**, which by default re-renders every child.
 
-```
-Counter()  runs again
-    ↓
-NEW elements
-    ↓
-work-in-progress fiber tree
-    ↓
-DIFF against the current tree
-    ↓
-only the differences reach the DOM
-```
+What's absent from that list is as instructive as what's on it. Mutating a plain variable doesn't trigger a render — React isn't watching your variables. Mutating an object that happens to be in state doesn't either, because React never sees a new reference and concludes nothing changed. Changing a ref doesn't, by design — that's the entire point of refs. Each of those produces the same confusing symptom: the data is correct and the screen is stale.
 
-## What triggers a render — exactly three causes
+## Why a parent re-render re-renders every child
 
-```
-1. Initial mount        createRoot(...).render(<App />)
-2. A state update       setState / dispatch in THIS component
-3. A parent re-rendered by default, ALL children re-render
-```
+This surprises people, and the reasoning behind it is worth understanding rather than just accepting.
 
-Not in the list: mutating a variable, mutating an object in state, or changing a ref. None of those notify React.
+When a parent re-renders, React does **not** check whether each child's props changed before calling it. It just calls them all. That sounds wasteful until you consider the alternative: comparing props costs something too, and for the overwhelming majority of components — a button, a label, a small div — running the function is cheaper than checking whether you need to. React makes the bet that re-running is cheaper than comparing, which is correct in the common case.
 
-## What actually re-runs
+There's a second reason it matters less than it seems. Even when a child re-renders needlessly, it produces the same element tree it produced before, so reconciliation finds no differences and **nothing reaches the DOM**. The expensive part of the pipeline never runs.
 
-```jsx
-<App>
-  <Navbar />
-  <Counter />     ← state changed here
-  <Footer />
-</App>
-```
+Where this becomes a genuine problem is narrow: a child that's genuinely expensive to render — a chart computing a layout, a table transforming thousands of rows — re-running when its inputs haven't changed. That's the case `React.memo` exists for, and it's why memo should follow profiling rather than precede it.
 
-State changed inside `Counter`, so React executes `Counter()` and everything **below** it. `Navbar` and `Footer` are untouched — the update started at `Counter`.
+## Where the update starts
 
-But flip it — put the state in `App`:
+One practical detail follows from all this: **an update propagates downward from the component whose state changed**, not from the root.
 
-```jsx
-function App() {
-  const [count, setCount] = useState(0);
-  return <><Navbar /><Counter count={count} /><Footer /></>;
-}
-```
+If state lives in a deeply nested component, only that component and its descendants re-render; everything above and beside it is untouched. If the same state is lifted to `App`, then `App` and its entire tree re-render on every change — including siblings whose props are identical.
 
-Now:
+That's the real performance argument for the "keep state as low as possible" rule from [Part 5](05-state.md). Lifting state isn't just an architectural preference; it widens the blast radius of every update.
 
-```
-App()      runs
-Navbar()   runs   ← props identical, but it runs anyway
-Counter()  runs
-Footer()   runs   ← props identical, but it runs anyway
-```
+## Initial render vs update
 
-> **By default, when a component re-renders, all of its children re-render** — React does *not* check whether their props changed first. Comparing props costs something too, and re-running a function is usually cheaper.
+The two paths differ meaningfully. On the **initial render** there is no previous tree, so there's nothing to compare — every fiber is flagged as a placement, every DOM node is created, and React attaches the whole subtree in a single insertion rather than node by node. On an **update**, the work-in-progress tree is built against the existing one, most fibers are found to be unchanged, and only the differences are flagged.
 
-That sounds alarming and usually isn't:
-
-```
-Navbar re-renders  → produces an IDENTICAL element tree
-                   → the diff finds NOTHING
-                   → ZERO DOM operations
-```
-
-**Re-render ≠ repaint.** The cost was one function call and one comparison, both cheap. It matters only when a child is genuinely expensive — and that's exactly when `React.memo` earns its keep, trading a shallow prop comparison for a skipped subtree.
+That asymmetry is why mounting a large component is often noticeably more expensive than updating it, and why remounting something unnecessarily — by changing its `key`, or by defining a component inside another component — is such a costly mistake.
 
 ---
 
 <a name="fiber"></a>
-# 4. Fiber Architecture (before & after)
+# 4. Fiber Architecture
 
 > **Fiber** — React's reconciliation engine, introduced in React 16, in which the component tree is represented as a linked list of "fiber" nodes that can be processed incrementally, allowing rendering work to be paused, resumed, prioritized or discarded.
 
-## BEFORE — the stack reconciler (React ≤ 15)
+## The problem: recursion cannot be paused
 
-The old reconciler walked the tree with **plain recursion**. Each nested call sat on the JavaScript call stack.
+To understand why Fiber exists you need to see precisely what was wrong before it, and the flaw is more fundamental than "it was slow."
 
-Recursion has a property that turned out to be fatal: **you cannot pause it.** Once you start, the stack unwinds only when the whole traversal finishes. The intermediate state lives in the call stack, which you don't control.
+The old reconciler — retroactively called the **stack reconciler** — walked the component tree with ordinary recursion. `render` called itself for each child, and each nested call sat on the JavaScript call stack. This is the natural way to traverse a tree, and it worked correctly.
 
-```
-Big Render
-██████████████████████████
-        Browser Frozen
-```
+The problem is a property of recursion itself: **the traversal's position is stored in the call stack, which you do not control.** There is no way to stop halfway, hand the thread back to the browser, and resume later, because "where am I in the tree" exists only as a stack of pending function calls that the engine unwinds when it's ready. You cannot serialize it, pause it, or abandon it.
+
+The consequence was that once a render started, it ran to completion — occupying the single main thread for its full duration.
 
 ```
 user types a character
@@ -738,42 +679,71 @@ React begins rendering 5,000 components (recursive, unstoppable)
 browser finally free to process the keystroke and paint
 ```
 
-No clicks, no typing, no animation, no scroll for the whole duration. And there was no way to say "the keystroke matters more than this list update" — every render had identical priority and ran to completion.
+For those 300 milliseconds nothing else could happen. No input handling, no animation frames, no scrolling. The character the user typed appeared a third of a second after they typed it. And because every render was equally unstoppable, there was **no way to express that the keystroke mattered more than the list update** — priority didn't exist as a concept.
 
-## AFTER — Fiber
+## What Fiber changed
+
+Fiber replaced recursion with an **explicit, iterative work loop over a linked list.** Rather than relying on the call stack to remember position, React keeps that information in its own data structure — which means it can put the structure down and pick it up again.
+
+A fiber node holds both the work to be done and the pointers needed to traverse without recursion. The three pointers — `child` (down), `sibling` (across), `return` (up) — encode the same tree the call stack used to, but as data React owns:
 
 ```
-████   pause   ██   pause   ███   pause   ██   done
-  │      │      │     │      │     │       │
-  │   browser   │  browser   │  browser    │
-  │   handles   │  handles   │  handles    │
-  │   a click   │  a paint   │  a keypress │
+     Counter
+        │ child
+        ▼
+       h1 ──sibling──► button
+        │ return           │ return
+        └──────┬───────────┘
+               ▼
+            Counter
 ```
 
-React replaced recursion with an **explicit, iterative work loop over a linked list**:
+Traversal then becomes a loop rather than a recursion:
 
 ```js
-// conceptually:
 while (nextUnitOfWork && !shouldYieldToBrowser()) {
   nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
 }
-// if we yielded, resume from nextUnitOfWork on the next frame
+// if we yielded, resume from nextUnitOfWork later
 ```
 
-Because "where am I" is a variable rather than the call stack, React processes one fiber, checks whether it has used its ~5ms slice, and if so **returns control to the browser** — then picks up exactly where it left off.
+`nextUnitOfWork` is an ordinary variable holding a fiber. React processes one fiber, checks whether it has used its time slice, and if so **stores that variable and returns control to the browser**. The browser handles input and paints a frame. Then React resumes from exactly the same fiber.
 
-## What changed
+That's the whole trick, and it's worth stating plainly because it sounds more mysterious than it is: **Fiber made the traversal position a variable instead of the call stack.** Everything else follows from that.
+
+## Each fiber is processed in two passes
+
+Traversal isn't a single visit per node. React performs a **begin** phase going down — where it calls the component function, produces children, and creates or reuses their fibers — and a **complete** phase coming back up, where it finalises the node and bubbles its effect flags toward the parent.
+
+This matters because it's what makes the effect list possible. By the time React returns to the root, each fiber has collected the flags of everything beneath it, so React knows exactly which nodes need DOM work without re-walking the tree in the commit phase.
+
+## Double buffering — why abandoning work is free
+
+Fiber maintains **two complete trees** at all times: the `current` tree, which corresponds to what's on screen, and the `work-in-progress` tree, which React is building. Each fiber's `alternate` pointer links it to its counterpart in the other tree, so React can reuse fiber objects between renders rather than allocating a new tree from scratch each time.
+
+React builds into the work-in-progress tree, mutating nothing the user can see. When the render completes, committing is a **single pointer swap** — `root.current` now points at the new tree, and the old one becomes the scratch space for the next render.
+
+The consequence is the one that makes concurrency possible: **incomplete work exists only in a tree nothing is displaying, so discarding it costs nothing.** React can be 80% through rendering a large update, receive a higher-priority one, throw the entire work-in-progress tree away, and start over — with no cleanup, no rollback, and no visible artifact.
+
+This is the same technique as double buffering in graphics, and for the same reason: never show a partially drawn frame.
+
+## What actually improved
+
+The most common misconception about Fiber is that it made React faster. **It did not.** A render performs the same total work and takes roughly the same total time. If anything, the bookkeeping adds a small overhead.
+
+What changed is that the work became **divisible and abandonable**. That's an architectural change, not a performance one — but it's the change that made everything since possible: priority lanes, interruptible rendering, transitions, Suspense, and streaming server rendering all depend on being able to stop mid-render.
+
+The user-facing improvement is **responsiveness**, not speed. The same 300ms of work now happens in sixty five-millisecond slices with the browser free in between, so the interface stays alive throughout instead of freezing and then catching up.
 
 | | Stack reconciler (≤15) | Fiber (16+) |
 |---|---|---|
 | Traversal | recursion | iterative loop over a linked list |
+| Position stored in | the JS call stack | a variable React owns |
 | Interruptible | ❌ impossible | ✅ yields every few ms |
 | Priorities | none — all work equal | lanes: urgent vs deferrable |
 | Abandoning work | impossible | free — discard the WIP tree |
 | Long renders | freeze the page | stay responsive |
 | Enabled | — | Suspense, transitions, concurrent rendering |
-
-> ⚠️ **Fiber did not make rendering faster.** The total work is the same. It made the work **divisible and abandonable** — which is what later unlocked priorities, transitions, Suspense and streaming SSR. The user-facing improvement is responsiveness, not speed.
 
 ---
 
@@ -782,55 +752,28 @@ Because "where am I" is a variable rather than the call stack, React processes o
 
 > **Scheduling** — deciding *when* and *in what order* React performs rendering work, based on the priority of each update.
 
-Once work is interruptible, a question follows immediately: when you pause, what next? That's the scheduler's job.
+Once work became interruptible, a new question appeared that hadn't existed before: **when you pause, what should happen next?** Fiber provides the ability to stop; the scheduler provides the policy for when to stop and what to resume.
 
-## The core idea
+## The constraint: one thread, many claimants
 
-The browser's main thread is single-threaded and shared: JavaScript, layout, paint and input handling all compete for it. If React occupies it for 300ms, nothing else happens for 300ms.
+Everything in a browser tab shares a single main thread — your JavaScript, style recalculation, layout, painting, and event handling. They cannot run simultaneously. If React occupies that thread for 300 milliseconds, nothing else happens for 300 milliseconds, no matter how fast the machine is.
 
-React works in **time slices of roughly 5ms**, then checks whether the browser has more urgent work — a pending keystroke, a frame to paint — and yields if so.
+The scheduler's job is to make sure React never holds the thread long enough for a user to notice. It works in **time slices of roughly five milliseconds** — chosen because it's comfortably inside a 16ms frame budget, leaving room for the browser's own work. After each slice React checks whether anything more urgent is waiting: a pending input event, a frame that needs painting. If so, it yields.
 
 ```
 ──── 5ms ────┬──── browser ────┬──── 5ms ────┬──── browser ────┬─── …
 React works  │ input + paint   │ React works │ input + paint   │
 ```
 
-## The 10,000-row example
+The total work is unchanged. What changed is that the browser gets regular openings to handle a keystroke, which is the difference between an interface that feels responsive and one that feels frozen.
 
-```
-Huge Table
-10,000 rows
-```
+Conceptually this is similar to `requestIdleCallback`, but React ships its own scheduler implementation for consistent cross-browser behaviour and finer control over priority.
 
-**Without scheduling:**
-
-```
-Render everything
-       ↓
-   UI freezes
-       ↓
-user clicks — nothing happens for 400ms
-```
-
-**With scheduling:**
-
-```
-render 100 rows
-       ↓
-     pause
-       ↓
- user clicks → handled IMMEDIATELY
-       ↓
-continue rendering
-       ↓
-     pause
-       ↓
-    finish
-```
-
-## Priorities (lanes)
+## Lanes — the priority system
 
 > **Lane** — React's internal priority label for an update, determining how urgently it must be processed.
+
+Not all updates deserve the same treatment, and the scheduler encodes that as a priority ordering:
 
 ```
 URGENT   ┌ discrete input   click, keypress, typing   must feel instant
@@ -840,98 +783,59 @@ URGENT   ┌ discrete input   click, keypress, typing   must feel instant
 IDLE     └ idle             offscreen / prefetch      whenever there's room
 ```
 
-Higher priority **interrupts** lower priority:
+The reasoning behind the ordering is perceptual rather than technical. A user notices a delay between pressing a key and seeing the character far more readily than a delay in a list updating beneath it. Discrete input is therefore the highest priority, because it's where human perception is least forgiving.
 
-```
-transition render (50% done)
-        ↓  click arrives
-   THROW AWAY the work-in-progress tree
-        ↓
-   handle the click, commit, paint
-        ↓
-   restart the transition from scratch
-```
+Higher-priority work **interrupts** lower-priority work already in progress. If React is halfway through rendering a transition and a click arrives, it abandons the work-in-progress tree, handles the click through to commit and paint, then restarts the transition from the beginning.
 
-Discarding is free — that work only existed in a tree nobody was displaying.
+Restarting rather than resuming might sound wasteful, and sometimes it is — but it's usually correct, because the click likely changed the state the transition was rendering from. Resuming would commit a tree computed from stale inputs. And the discard itself is free, for the double-buffering reason from §4.
 
-## Batching
+## Batching, and why it improved in React 18
 
 > **Batching** — grouping multiple state updates occurring in the same tick into a single re-render.
 
-```jsx
-setA(1);
-setB(2);
-setC(3);
-```
+Batching predates Fiber conceptually but is a scheduling behaviour. When you call three setters in one handler, React doesn't render three times. It queues each update, lets the handler finish, then processes the whole queue in one render pass.
 
-```
-setA → queue
-setB → queue
-setC → queue
-handler ends → process the queue → ONE render → ONE diff → ONE commit
-```
+Without this you'd render once per setter, and the user could briefly see intermediate states — a form showing "saved" while still displaying stale data, for instance. Batching is as much a correctness feature as a performance one.
 
-```
-React 17:  batched only inside React event handlers
-React 18:  batched EVERYWHERE — promises, setTimeout, native listeners (createRoot)
-escape hatch: flushSync — forces a synchronous render
-```
+This is also the real explanation for why state appears "asynchronous." It isn't async in the promise sense — nothing is awaiting anything. It's **scheduled**: the update sits in a queue until React processes it, which is after your function has finished running. Combined with the fact that the state variable in the current render is a frozen snapshot, that fully explains why reading state immediately after setting it gives the old value.
 
-This is also why state looks "asynchronous": it isn't async in the promise sense, it's **scheduled**.
+Before React 18, batching applied **only inside React's own event handlers**. Updates in a promise callback, a `setTimeout`, or a native event listener each triggered their own render, because those code paths didn't flow through React's batching wrapper. React 18's `createRoot` routes everything through the scheduler, so batching became **automatic everywhere**.
+
+`flushSync` is the deliberate escape hatch — it forces a synchronous render, which you occasionally need when the next line of code must read an updated DOM. Using it routinely defeats the point of batching.
 
 ---
 
 <a name="concurrent"></a>
-# 6. Concurrent Rendering (React 18)
+# 6. Concurrent Rendering
 
 > **Concurrent rendering** — React's ability to prepare multiple versions of the UI at the same time, interrupting, pausing, resuming or abandoning render work so urgent updates are never blocked by less urgent ones.
 
-It is **not** multithreading. Everything still runs on one thread. "Concurrent" means *interleaved* — like an operating system interleaving processes on one CPU.
+## What "concurrent" does and doesn't mean
 
-## The scenario
+The word causes trouble, so start by ruling out the wrong reading. **This is not multithreading.** There are no workers, no parallelism, and everything still runs on a single thread. React cannot render two components simultaneously any more than it could before.
 
-The user types:
+"Concurrent" here means *interleaved* — React can have several renders in flight and switch between them, in the same way an operating system interleaves processes on one CPU core. Nothing runs at the same instant; the machine just switches fast enough that everything stays responsive.
 
-```
-R
-Re
-Rea
-Reac
-React
-```
+## The problem it addresses
 
-Meanwhile a huge list is filtering on every keystroke.
+Before concurrent features, every update was equally urgent and every render ran to completion. Consider a search box that filters ten thousand rows. Each keystroke sets state, which triggers a render, which performs the filtering — say 200 milliseconds. During those 200ms the main thread is busy, so **the character the user typed cannot appear on screen**. The input lags behind the keyboard, which is one of the most viscerally broken-feeling things an interface can do.
 
-**Without concurrent rendering:**
+The pre-concurrent workaround was **debouncing**: wait 300ms after typing stops, then filter. It works, but it's a blunt instrument. It delays the results for everyone regardless of how fast their machine is, it's a guessed constant rather than a response to actual conditions, and if you debounce the input value itself you delay the feedback the user most wanted to be instant.
 
-```
-keypress "R"
-     ↓
-render + filter 10,000 items  ████████████ 200ms (blocking)
-     ↓
-"R" finally appears
+## What concurrent rendering does instead
 
-Result:  Keyboard Lag
-```
-
-**With concurrent rendering:**
-
-```
-Typing     ── HIGH priority ──►  committed immediately
-Filtering  ── LOW  priority ──►  rendered in the background,
-                                 interrupted by each keystroke
-```
+The insight is that the problem isn't the amount of work — it's that all of it was treated as equally urgent. Concurrent rendering lets you **say which update matters more**.
 
 ```jsx
 function handleChange(e) {
-  setQuery(e.target.value);                       // urgent — the input
+  setQuery(e.target.value);                       // urgent — the input must feel instant
   startTransition(() => {
-    setResults(filterHugeList(e.target.value));   // non-urgent — the list
+    setResults(filterHugeList(e.target.value));   // non-urgent — interruptible
   });
 }
 ```
 
-React can **interrupt the filtering work to keep typing smooth** — and when it does, the stale half-finished filter is discarded rather than committed:
+Now there are two updates with different priorities from a single event. The input update commits immediately, so the character appears at once. The filtering renders in the background in interruptible slices — and if another keystroke arrives mid-render, that work is **thrown away** and restarted with the newer query rather than being completed and committed with a stale result.
 
 ```
 type "R"   → start filtering...
@@ -940,39 +844,39 @@ type "Rea" → ABANDON, restart with "Rea"
 (pause in typing) → finish → commit results
 ```
 
-Compare to the old workaround:
+The difference from debouncing is worth naming precisely: **debouncing is a guess about timing; a transition is a statement about importance.** React figures out the timing from actual conditions — a fast machine may complete the filtering between keystrokes and never need to abandon anything, while a slow one degrades gracefully.
 
-```
-debounce      → a guessed timing constant that delays EVERYTHING
-transition    → a semantic statement: "this matters less than input"
-```
+`useDeferredValue` provides the same capability from the other direction, for when you receive a value rather than owning the setter that produces it.
 
-This capability is exposed by `startTransition` and `useDeferredValue`.
+## What it costs
 
-## What changed
+Concurrency is why several rules that previously seemed pedantic became genuinely load-bearing.
+
+**The render phase must be pure.** This was always the documented rule, but before concurrency you could often violate it without consequence, because render ran once per update. Now a render may run several times for one logical update and have its results discarded, so a side effect in render can fire two or three times, or fire for a tree that's never committed.
+
+**Strict Mode double-invokes components and effects in development** precisely to surface code that breaks this assumption. It's not arbitrary strictness; it's a test for a property concurrency now depends on.
+
+**Tearing became possible.** This is the subtle one.
+
+> **Tearing** — a visual inconsistency where, during one concurrent render pass, different components read different values of the same external data source.
+
+If a component reads state that lives outside React — a Redux store, `localStorage`, `navigator.onLine` — and React pauses mid-render, that external state can change during the pause. Components rendered before the pause then hold the old value while components rendered after hold the new one, and both get committed together. One render pass, two different truths, visible on screen at the same time.
+
+This cannot happen with React state, because React controls it and keeps it consistent for the duration of a render. It only arises at the boundary with external stores, which is exactly why `useSyncExternalStore` was added — it gives React a formal way to read an external source and guarantee a consistent snapshot across a render pass. This is why every state-management library had to adopt it to work correctly with React 18.
+
+## How you turn it on
+
+Concurrent features are **opt-in per update, not per application**. Using `createRoot` from React 18 makes them available, but simply upgrading doesn't make your renders interruptible — regular `setState` still renders eagerly and synchronously.
+
+A render becomes concurrent only when something marks it: `startTransition`, `useDeferredValue`, or a Suspense boundary. This gradual-adoption design is deliberate — it let React 18 ship without breaking existing applications, and it means you can introduce concurrency exactly where you've measured a problem.
 
 | | Legacy rendering | Concurrent rendering |
 |---|---|---|
 | Update priority | all equal | urgent vs transition vs idle |
 | A long render | blocks input and paint | yields every ~5ms |
 | Stale in-progress work | must complete | discarded and restarted |
-| Handling slow updates | debounce (a timing guess) | mark as a transition (semantic) |
+| Handling slow updates | debounce (a timing guess) | mark as a transition (a statement of importance) |
 | Enables | — | Suspense, streaming SSR, `useDeferredValue` |
-
-## What it costs
-
-```
-render must be PURE      it may run several times, results thrown away
-Strict Mode double-runs  in dev, to expose code that breaks that assumption
-TEARING becomes possible external state read mid-render can differ between
-                         components → useSyncExternalStore fixes it
-```
-
-> **Tearing** — a visual inconsistency where, during one concurrent render pass, different components read different values of the same external data source.
-
-## Enabling it
-
-Concurrent features are opt-in **per update**, not per app. `createRoot` (React 18+) makes them available; a render becomes concurrent only when you mark it — `startTransition`, `useDeferredValue`, or Suspense. Ordinary `setState` still renders eagerly.
 
 ---
 
@@ -988,71 +892,73 @@ Concurrent features are opt-in **per update**, not per app. `createRoot` (React 
 | Updating strategy | you specify each operation | you describe the end state |
 | Directly visible | yes | no |
 
-## ⚠️ The answer interviewers are testing for
+## The claim to be careful about
 
-> **The Virtual DOM is not faster than direct DOM manipulation.**
+The common statement is "the Virtual DOM is faster than the real DOM," and it's the answer interviewers are usually probing when they ask about it — because it's not right.
 
-Perfectly hand-written imperative code that updates exactly the one text node that changed will always beat React, because React additionally builds a tree and diffs it. **The Virtual DOM adds work.**
+The comparison is category-confused to begin with: the Virtual DOM isn't an alternative to the DOM, it's a staging layer *in front of* it. Every change still ends up in the real DOM. Nothing is avoided; the question is only how much.
 
-What it buys is different:
+And on raw speed, **React is slower than well-written manual DOM code.** If you know that exactly one text node changed and you write `node.textContent = "1"`, that beats React's approach, which additionally builds a full element tree, builds or reuses a fiber tree, walks both trees comparing, produces an effect list, and then does the same single write. The Virtual DOM adds work — that's simply true.
 
-1. **Consistently good updates for free** — declarative code, near-minimal DOM operations, no hand-optimizing.
-2. **Batching** — many logical changes collapse into one coordinated DOM update, avoiding layout thrashing.
-3. **A programming model** — you describe *what the UI is*, not *how to transition between states*, which eliminates a whole category of bugs.
+## What it actually buys
 
-> **Interview phrasing:** *"The Virtual DOM isn't a performance trick that beats manual DOM work — it's a way to get near-optimal updates while writing declarative code. The win is that React batches and minimizes real DOM mutations, which are the genuinely expensive part because they trigger layout and paint."*
+Three things, none of which is "raw speed."
+
+**Consistently near-optimal updates without effort.** The hand-written version is faster, but only if you write it correctly every time, for every interaction, in every component, and keep it correct through every refactor. In practice nobody does. React's floor is much higher than a typical hand-written implementation's average, and it stays high as the application grows.
+
+**Batching and ordering.** Because React computes the full change set before touching the DOM, it can apply everything in one coordinated pass. A naive implementation performs its writes as it discovers them, interleaved with reads, which is exactly the layout-thrashing pattern from §1. React eliminates that by construction.
+
+**A programming model.** This is the largest benefit and the one least related to performance. You describe *what the UI is for the current state* instead of *how to transition from one state to another*. That eliminates an entire category of bug — the "I forgot to reset that class on the error path" family — which is what made React worth adopting in the first place.
+
+> **Interview phrasing:** *"The Virtual DOM isn't a performance trick that beats manual DOM work — hand-optimized imperative code wins on raw speed because React adds a diffing step. It's a way to get near-optimal updates while writing declarative code. The real win is that React computes the whole change set before touching the DOM, so it batches mutations and avoids layout thrashing, and that you never have to hand-write transition logic."*
 
 ---
 
 <a name="keys"></a>
 # 8. Keys & O(n) Diffing
 
-## The theoretical problem
+## Why the naive approach is impossible
 
-Comparing two arbitrary trees and finding the minimal set of transformations is a solved problem in computer science, with an optimal complexity of **O(n³)**. For a thousand nodes that's a billion operations — per update. Unusable.
+Comparing two arbitrary trees and computing the minimal set of transformations between them is a well-studied problem, and the optimal algorithms run in **O(n³)**. That's not a hand-wave — it's the actual complexity of general tree edit distance.
 
-React reaches **O(n)** by refusing to solve the general problem. It applies two assumptions that are almost always true of real interfaces, and accepts being non-optimal in the rare cases where they aren't:
+For a UI, that's fatal. A modest page has a thousand nodes, and a billion operations per update is not something you can do sixty times a second. A general-purpose diffing algorithm cannot be used for rendering, full stop.
 
-```
-1. Two elements of DIFFERENT TYPES produce different trees
-   → don't search for similarities inside; destroy and rebuild
+## React's trade
 
-2. The developer can hint which children are stable across renders
-   → that hint is the KEY
-```
+React reaches **O(n)** — a single pass — not by finding a cleverer algorithm but by **declining to solve the general problem**. It adopts two assumptions that are almost always true of real user interfaces, and accepts producing non-minimal results in the cases where they aren't:
 
-## What a key means
+**Assumption 1: elements of different types produce entirely different trees.** If a `<div>` becomes a `<section>`, React doesn't search inside for salvageable subtrees. It destroys and rebuilds. In practice this is nearly always right — when a wrapper's type changes, the content genuinely is different — and searching for cross-type similarities is precisely the expensive part of the general algorithm.
+
+**Assumption 2: the developer can tell React which children are stable across renders.** That hint is the `key`. Without it, matching children between two lists would require the expensive general comparison; with it, matching is a hash lookup.
+
+Both assumptions convert a search problem into a lookup problem, which is what collapses the complexity.
+
+## What a key actually promises
 
 > **A key is a promise: "this element represents the same logical item as the element with this key in the previous render."**
 
-```
-no key   → match by POSITION → insert at the front rewrites every row
-index    → positional → looks like a key, behaves like none
-stable id→ true identity → minimal operations, state stays with its item
-```
+That framing explains everything about how keys behave. React takes the promise at face value — it doesn't verify it and can't. When you supply a key, you are asserting identity, and React acts on that assertion. If the assertion is false, React does exactly the wrong thing with complete confidence.
 
-## The rules
+Which is why the index-as-key bug is so severe. An index asserts "the item at position 0 last render is the same logical item as the item at position 0 this render" — a statement that is false the moment anything is inserted, deleted, filtered, or sorted. React believes it, applies the same-type rule, keeps the existing DOM node, and swaps its contents. Everything attached to that node — a checkbox's checked state, an input's typed text, focus, scroll position, an in-progress animation — stays put and now belongs to a different item.
 
-| Rule | Detail |
+The result is a UI that displays correct data with incorrect state attached to it. No error, no warning, nothing to catch in a test that only checks rendered text. It's the most convincing argument in React for understanding a mechanism rather than following a rule.
+
+## The rules, and their reasons
+
+| Rule | Reason |
 |---|---|
-| **Stable** | same item → same key across renders. Never `Math.random()` — that recreates every node every render |
-| **Unique among siblings** | only within one list. Two different lists may both use `1, 2, 3` |
-| **On the outermost element** returned from `.map()` | not on a child inside it |
-| **Not readable as a prop** | React consumes `key`. Need it inside? `<Row key={id} id={id} />` |
+| **Stable across renders** | the key *is* the identity. `Math.random()` gives every item a new identity each render, so React destroys and recreates every node, every time — worse than no key |
+| **Unique among siblings only** | matching happens within one list, so two separate lists may both use `1, 2, 3` without conflict |
+| **On the outermost element returned from `.map()`** | React matches the children of one parent; a key on a nested element is matching in the wrong list |
+| **Not readable as a prop** | React consumes it for reconciliation; pass it again under another name if the component needs the value |
 
-## When index-as-key is acceptable
+Index keys are acceptable in exactly one situation, and all three conditions must hold: the list is genuinely static — never reordered, filtered, inserted into or deleted from — the items hold no state of any kind, and no stable identifier exists. In practice that's rare enough that reaching for an index should feel like a decision rather than a default.
 
-Only when **all three** hold:
+## What the heuristics cost
 
-```
-1. The list is static — never reordered, filtered, inserted into, or deleted from
-2. Items have no state (no inputs, no toggles, no focus)
-3. There is genuinely no stable id available
-```
+React's diff is linear but **not minimal**, and it's worth knowing where it gives up ground. Moving a subtree from one parent to a different parent destroys and recreates it, because React never compares nodes across different levels of the tree — it only ever compares a node with the node in the same position in the other tree, and children with children of the same parent.
 
-## The cost of the heuristics
-
-React's diff is O(n) but **not minimal**. Moving a subtree from one parent to another destroys and recreates it, because React never compares across different levels of the tree. React accepts that trade: near-optimal results at linear cost beats optimal results at cubic cost.
+So relocating a large component in the hierarchy loses all its state and rebuilds its DOM, even though an ideal algorithm would recognise it as a move. React accepts that: near-optimal results at linear cost beats optimal results at cubic cost, and the case is rare enough in real interfaces that the trade is clearly worth it.
 
 ---
 
@@ -1063,55 +969,61 @@ React's diff is O(n) but **not minimal**. Moving a subtree from one parent to an
 > *"An in-memory tree of plain JavaScript objects — React Elements — describing what the UI should look like. When state changes, React builds a new tree, compares it with the previous one, and derives the minimal set of real DOM operations. It exists because those objects are cheap to create and compare, while real DOM mutations are expensive since they can trigger style recalculation, layout and paint."*
 
 ### Q: "Is the Virtual DOM faster than the real DOM?"
-> *"That comparison doesn't quite work — the Virtual DOM is a staging layer, not a replacement. And it's not faster than well-written manual DOM code: hand-optimized imperative updates will beat React because React adds a diffing step. What it gives you is consistently near-optimal updates for free while you write declarative code, plus batching so many logical changes become one coordinated DOM update instead of many interleaved reads and writes."*
+> *"That comparison doesn't quite work — the Virtual DOM is a staging layer in front of the DOM, not a replacement for it. And it's not faster than well-written manual DOM code: hand-optimized imperative updates beat React because React adds a diffing step on top of the same final write. What it gives you is consistently near-optimal updates while you write declarative code, and because React computes the whole change set before touching the DOM, it batches mutations and avoids layout thrashing."*
 
 ### Q: "Why are DOM operations expensive?"
 > *"Not because setting a property is slow, but because of what follows. Changing geometry forces the browser to recalculate styles and re-run layout, which is interdependent across the tree — one element's width can cascade through thousands of nodes. It gets worse with layout thrashing, where alternating writes and reads forces a synchronous layout on every iteration instead of one batched layout at the end."*
 
 ### Q: "What is reconciliation?"
-> *"The algorithm React uses to compare the new element tree with the previous one and work out the minimum DOM changes. The general tree-diffing problem is O(n³), which is unusable, so React gets to O(n) with two heuristics: elements of different types produce entirely different trees, so the old subtree is destroyed; and keys tell React which children correspond to which across renders."*
+> *"The algorithm React uses to compare the new element tree with the previous one and determine the minimum DOM changes. The general tree-diffing problem is O(n³), which is unusable for a UI, so React gets to O(n) by declining to solve the general problem: it assumes elements of different types produce entirely different trees, so it destroys rather than searching for similarities, and it relies on keys to tell it which children correspond across renders. Both assumptions turn a search into a lookup."*
 
 ### Q: "What happens when an element's type changes?"
 > *"React tears down the entire old subtree and builds the new one from scratch — all component state inside is lost and DOM nodes are recreated. It never tries to find similarities across a type change. That's also the mechanism behind using a `key` to reset a component: changing the key makes React treat it as a different element and remount it."*
 
 ### Q: "What do keys do and why is index-as-key a problem?"
-> *"Keys give list items a stable identity so React can match elements across renders instead of comparing by position. Without them, inserting at the front makes React patch every row rather than insert one node. An index is positional, so it changes meaning whenever the list is reordered or filtered — React sees the same key, assumes the same element, keeps the existing DOM node and just swaps the content. So component state like a checked checkbox or typed input ends up attached to the wrong item. That's a correctness bug, not just a performance one."*
+> *"A key is a promise that this element is the same logical item as the one with that key last render. React takes the promise at face value — it can't verify it. An index asserts that position equals identity, which is false as soon as anything is inserted, deleted or reordered. React believes it, applies the same-type rule, keeps the existing DOM node and swaps the content — so the node's state, like a checked checkbox or typed input, stays put and now belongs to the wrong item. It's a correctness bug that produces correct data with wrong state attached, and nothing throws."*
 
 ### Q: "What is Fiber and what problem did it solve?"
-> *"Fiber is React 16's reconciliation engine. The old reconciler traversed the tree with recursion, and recursion can't be paused — once a render started it ran to completion, blocking the main thread. A large render froze input and animation for hundreds of milliseconds. Fiber represents the tree as a linked list of fiber nodes with child, sibling and return pointers, and processes them in an explicit loop. Because the traversal position is a variable rather than the call stack, React can yield to the browser every few milliseconds and resume later."*
+> *"React 16's reconciliation engine. The old reconciler traversed the tree with recursion, and the fundamental problem isn't that recursion is slow — it's that its position lives in the call stack, which you don't control, so it can't be paused. Once a render started it ran to completion, blocking the main thread; a large render froze input and animation for hundreds of milliseconds, and there was no way to say one update mattered more than another. Fiber represents the tree as a linked list with child, sibling and return pointers and processes it in an explicit loop, so the traversal position is a variable React owns. That's what lets it yield to the browser every few milliseconds and resume."*
 
 ### Q: "Did Fiber make React faster?"
-> *"Not in raw throughput — a render takes about the same total time. It made the work divisible and abandonable, which is what enabled everything since: priority lanes, interruptible rendering, transitions, Suspense and streaming SSR. The user-facing improvement is responsiveness, not speed."*
+> *"No — a render performs the same total work and takes about the same total time; the bookkeeping adds slight overhead. What it made the work is divisible and abandonable, which is an architectural change rather than a performance one. That's what enabled everything since: priority lanes, transitions, Suspense, streaming SSR. The user-facing improvement is responsiveness — the same 300ms happens in sixty small slices with the browser free in between, so the interface never freezes."*
 
 ### Q: "What is a fiber node?"
-> *"An object per component holding the work to be done and the pointers to traverse without recursion: type, key, the corresponding DOM node, child, sibling and return pointers, pending and memoized props, memoized state — which is where the hooks list lives — effect flags, priority lanes, and an alternate pointer to its counterpart in the other tree."*
+> *"An object per component holding both the work to be done and the pointers to traverse without recursion: type, key, the corresponding DOM node, child, sibling and return pointers, pending and memoized props, memoized state — which is where the hooks linked list lives — effect flags, priority lanes, and an alternate pointer to its counterpart in the other tree."*
 
 ### Q: "What are the two trees React maintains?"
-> *"The current tree, which is what's on screen, and the work-in-progress tree, which React is building. Each fiber's `alternate` points to its counterpart. React builds the WIP tree without touching anything visible and commits by swapping a single pointer. It's double buffering — the same idea as never showing a partially drawn frame in graphics. It's also why abandoning a render is free: the incomplete work exists only in a tree nobody is displaying."*
+> *"The current tree, corresponding to what's on screen, and the work-in-progress tree React is building. Each fiber's `alternate` points to its counterpart, so fibers are reused between renders rather than reallocated. React builds into the WIP tree without touching anything visible and commits by swapping a single pointer. It's double buffering — never show a partially drawn frame — and it's why abandoning a render is free: the incomplete work only ever existed in a tree nobody was displaying."*
 
 ### Q: "Explain the render phase versus the commit phase."
-> *"The render phase calls components, builds the new tree and diffs it, producing a list of DOM changes. It's pure and interruptible — React may pause, restart or discard it, so it may run several times for one update. The commit phase applies those changes to the DOM and runs effects; it's synchronous and uninterruptible, because a half-applied UI would be visibly broken. That split is why side effects belong in effects and lifecycle 'did' methods, never in render."*
+> *"The render phase calls components, builds the new tree and diffs it, producing a list of DOM changes. It's pure and interruptible — React may pause, restart or discard it, so it can run several times for one logical update. The commit phase applies those changes to the DOM and runs effects; it's synchronous and uninterruptible, because a half-applied UI would be visibly broken. That split is the reason side effects belong in effects and 'did' lifecycle methods rather than in render."*
 
 ### Q: "What happens in the commit phase exactly?"
 > *"Three sub-phases. Before mutation, where the DOM is still the old version — `getSnapshotBeforeUpdate` runs there to measure things like scroll position. Mutation, where React inserts, updates and deletes nodes, runs layout-effect cleanups and `componentWillUnmount`, and swaps the current pointer. Then layout, where the DOM is new but not yet painted — `componentDidMount`, `componentDidUpdate` and `useLayoutEffect` run and refs are attached. After the browser paints, passive effects — `useEffect` — run asynchronously."*
 
 ### Q: "Why does `useLayoutEffect` prevent a flicker?"
-> *"It runs in the layout sub-phase of the commit, after the DOM is updated but before the browser paints, so a measurement-and-adjustment happens within the same frame and the intermediate state is never visible. `useEffect` runs after paint, so the same adjustment would be seen as a flash. The trade-off is that `useLayoutEffect` blocks painting, so slow work there delays the frame."*
+> *"It runs in the layout sub-phase of the commit, after the DOM is updated but before the browser paints, so a measure-and-adjust happens within the same frame and the intermediate state is never visible. `useEffect` runs after paint, so the same adjustment shows as a flash. The trade-off is that `useLayoutEffect` blocks painting, so slow work there delays the frame directly."*
 
 ### Q: "What is concurrent rendering?"
-> *"React's ability to work on multiple versions of the UI at once — pausing, resuming and abandoning render work so urgent updates aren't blocked. It's not multithreading; it's interleaving on one thread. Updates get priorities, so a keystroke can interrupt a heavy list render, and the interrupted work is discarded and restarted with fresh input rather than committing something stale."*
+> *"React's ability to work on multiple versions of the UI at once — pausing, resuming and abandoning render work so urgent updates aren't blocked. It's not multithreading; it's interleaving on one thread, like an OS switching between processes on one core. Updates carry priorities, so a keystroke can interrupt a heavy list render, and the interrupted work is discarded and restarted with fresh input rather than committing a result computed from stale state."*
+
+### Q: "How is a transition different from debouncing?"
+> *"Debouncing is a guess about timing — you pick a delay constant and it applies to everyone regardless of their machine, and it delays the results for everybody. A transition is a statement about importance: you tell React this update matters less than input, and React works out the timing from actual conditions. On a fast machine the work may finish between keystrokes and never be interrupted; on a slow one it degrades gracefully instead of hitting a fixed delay."*
 
 ### Q: "Do you have to do anything to get concurrent rendering?"
-> *"You need `createRoot` from React 18, but concurrency is opt-in per update rather than per app. A render only becomes interruptible when you mark it — `startTransition`, `useDeferredValue`, or Suspense. Regular `setState` still renders eagerly."*
+> *"You need `createRoot` from React 18, but it's opt-in per update rather than per app — upgrading alone doesn't make renders interruptible. A render becomes concurrent only when something marks it: `startTransition`, `useDeferredValue`, or Suspense. That gradual-adoption design is deliberate, so React 18 could ship without breaking existing apps."*
 
 ### Q: "What is tearing?"
-> *"A visual inconsistency where, during one concurrent render pass, different components read different values of the same external data source — because React paused mid-render and the external store changed. It only arises with state outside React's control. `useSyncExternalStore` fixes it by guaranteeing every component in a render pass sees the same snapshot, which is why libraries like Redux and Zustand adopted it."*
+> *"A visual inconsistency where, during one concurrent render pass, different components read different values of the same external data source — because React paused mid-render and the store changed during the pause. Components rendered before and after the pause hold different values and both get committed. It can't happen with React state, since React keeps that consistent for the duration of a render; it only arises at the boundary with external stores. `useSyncExternalStore` guarantees a consistent snapshot, which is why Redux and Zustand had to adopt it for React 18."*
 
 ### Q: "Why does a parent re-rendering re-render all its children?"
-> *"Because React doesn't check whether props changed before calling a child — comparing props costs something too, and re-running a function is usually cheap. Also, most re-renders produce an identical tree, so the diff finds nothing and no DOM operations happen at all. `React.memo` opts a component out of that default, trading a shallow comparison for a possible skip — worth it only when the component is genuinely expensive."*
+> *"Because React doesn't check whether props changed before calling a child. Comparing props costs something too, and for most components re-running the function is cheaper than checking whether you need to. It also matters less than it sounds: the child usually produces an identical tree, the diff finds nothing, and no DOM operations happen. `React.memo` opts a component out of that default, which is worth it only when the component is genuinely expensive."*
 
 ### Q: "Does a re-render mean a DOM update?"
-> *"No. A re-render just means the component function ran again and produced a new element tree. React then diffs it, and only actual differences reach the real DOM. That's why most 'unnecessary re-renders' are harmless — the wasted work is the render and diff, not DOM writes."*
+> *"No. A re-render just means the component function ran again and produced a new element tree. React diffs it, and only actual differences reach the real DOM. That's why most 'unnecessary re-renders' are harmless — the wasted work is the render and the diff, not DOM writes."*
+
+### Q: "Where does an update start from?"
+> *"From the component whose state changed, propagating downward — not from the root. Everything above and beside it is untouched. That's the real performance argument for keeping state as low in the tree as possible: lifting state to the root means every update re-renders the entire application, including siblings whose props haven't changed."*
 
 ---
 
@@ -1127,7 +1039,7 @@ React's diff is O(n) but **not minimal**. Moving a subtree from one parent to an
 | **Double buffering** | Two trees — `current` (on screen) and `work-in-progress` (being built) — swapped by one pointer. Makes abandoning work free. |
 | **Reconciliation** | Determining what changed between the old and new trees: different type → rebuild; same type → patch; lists → match by key. |
 | **Diffing** | Comparing corresponding nodes' props to find the minimal updates, producing the effect list. |
-| **Keys** | Stable identity for list items so React matches by identity instead of position. Index keys attach state to the wrong item. |
+| **Keys** | A promise of identity across renders. Index keys assert position = identity, which is false the moment a list changes. |
 | **Render Phase** | React computes the next UI. Pure. No DOM mutations. Interruptible in concurrent mode. |
 | **Commit Phase** | React applies DOM updates, swaps the tree, attaches refs and runs layout effects. Synchronous, cannot be interrupted. |
 | **Browser Paint** | Style → Layout → Paint → Composite. Then passive effects (`useEffect`) run. |
@@ -1153,47 +1065,68 @@ REACT ELEMENT   a plain, IMMUTABLE JS object describing UI
 
 VIRTUAL DOM     the in-memory tree of React Elements — a STAGING AREA, not a fast DOM
                 ⚠️ NOT faster than hand-written DOM code (it adds a diff step)
-                the win: near-optimal updates for free + batching + declarative model
+                the win: near-optimal updates for free + batching (no thrashing)
+                         + the declarative model itself
 
 FIBER           a persistent WORK UNIT per component:
                 {type, key, stateNode, child, sibling, return,
                  pendingProps, memoizedProps, memoizedState(hooks),
                  flags, lanes, alternate}
                 child/sibling/return → traversable by LOOP, not recursion
-                → position is a VARIABLE, not the call stack → pause & resume
+                ⭐ THE INSIGHT: traversal position becomes a VARIABLE React owns,
+                   not the call stack → so it can pause and resume
+                two passes per node: BEGIN (down, build children)
+                                     COMPLETE (up, bubble effect flags)
+
+BEFORE FIBER    stack reconciler: recursion — position lives in the CALL STACK,
+                which you don't control → CANNOT pause → 300ms freezes,
+                and NO concept of priority
 
 DOUBLE BUFFER   current tree (on screen) ↔ work-in-progress tree (being built)
-                linked by `alternate` · commit = ONE pointer swap
+                linked by `alternate` (fibers are REUSED, not reallocated)
+                commit = ONE pointer swap
                 → abandoning a render is FREE (nothing was displaying it)
 
 RENDER          React CALLED YOUR FUNCTION. Produces elements. NO DOM touched.
-                re-render ≠ repaint. 50 renders can cause 0 DOM operations.
+                render ≠ commit ≠ paint
+                50 renders can cause 0 DOM operations
 TRIGGERS        1. initial mount  2. setState in this component  3. PARENT re-rendered
-                (React does NOT check props first — React.memo opts out)
-                NOT triggered by: mutating a variable / object / ref
+                React does NOT check props first (comparing costs too) — memo opts out
+                NOT triggered by: mutating a variable / object in state / a ref
+STARTS FROM     the component whose state changed, propagating DOWN — not the root
+                → the real reason to keep state LOW in the tree
+MOUNT vs UPDATE mount: no previous tree → everything is a Placement, one insertion
+                update: built against the existing tree, only differences flagged
+                → remounting unnecessarily is expensive
 
 RECONCILIATION  compare new tree vs old → minimal DOM change list
-DIFFING         optimal general tree diff = O(n³) → unusable
-                React = O(n) via heuristics:
-                  1. DIFFERENT TYPE → destroy the whole subtree, rebuild
+DIFFING         general tree diff is O(n³) — a BILLION ops for 1000 nodes, unusable
+                React = O(n) by DECLINING the general problem, via 2 assumptions:
+                  1. DIFFERENT TYPE → destroy the subtree, rebuild
+                     (don't search for similarities — that's the expensive part)
                      (all state lost — this is how key={id} resets a component)
-                  2. SAME TYPE → keep the node, patch only changed props
+                  2. the DEVELOPER supplies identity → the KEY
+                     (turns matching from a search into a lookup)
+                same TYPE → keep the node, patch changed props
                      (focus, scroll, selection, transitions, state all survive)
-                  3. LISTS → match by KEY, not position
-                output: the EFFECT LIST — only fibers flagged Placement/Update/Deletion
-                cost: moving a subtree across parents = destroy + recreate
+                output: the EFFECT LIST — fibers flagged Placement/Update/Deletion
+                COST: moving a subtree across parents = destroy + recreate
+                      (React never compares across tree levels)
 
-KEYS            "this is the same logical item as last render"
+KEYS            ⭐ a PROMISE: "same logical item as the key with this value last render"
+                React takes it at FACE VALUE — it can't verify it
                 no key → match by POSITION → inserting at the front rewrites every row
-                index  → positional → React keeps the node and swaps content
-                         → STATE ATTACHES TO THE WRONG ITEM (a correctness bug)
-                rules: stable · unique among SIBLINGS · outermost mapped element
-                       · not readable as a prop · never Math.random()
-                index OK only if: static list + no state + no stable id
+                index  → asserts position = identity → FALSE on any insert/delete/sort
+                         → React keeps the node and swaps the content
+                         → STATE ATTACHES TO THE WRONG ITEM
+                         → correct data, wrong screen, NOTHING THROWS
+                rules: stable (never Math.random) · unique among SIBLINGS
+                       · outermost mapped element · not readable as a prop
+                index OK only if: static list AND no state AND no stable id
 
 RENDER PHASE    calls components · builds elements · builds the WIP fiber tree
                 · reconciles · diffs · flags fibers
-                PURE · INTERRUPTIBLE · NO DOM touched · may run many times
+                PURE · INTERRUPTIBLE · NO DOM touched · MAY RUN SEVERAL TIMES
                 → this is WHY side effects can't live in render
 
 COMMIT PHASE    synchronous, UNINTERRUPTIBLE (a half-applied UI would be broken)
@@ -1204,28 +1137,33 @@ COMMIT PHASE    synchronous, UNINTERRUPTIBLE (a half-applied UI would be broken)
                                     · useLayoutEffect · refs attached
                 → 🎨 PAINT →  passive effects: useEffect (async, after paint)
 
-FIBER: BEFORE/AFTER
-                ≤15 stack: recursion → CANNOT pause → 300ms freezes, no priorities
-                16+ fiber: loop + linked list → yields every ~5ms, work is abandonable
-                ⚠️ Fiber didn't make rendering FASTER — it made work DIVISIBLE
-
-SCHEDULING      ~5ms slices, then yield to the browser for input + paint
+SCHEDULING      ONE main thread shared by JS, layout, paint and input
+                ~5ms slices (inside a 16ms frame), then YIELD
+                total work unchanged — the browser just gets regular openings
                 LANES (urgent → idle):
                   discrete input (click/key) > continuous (scroll/drag)
                   > default setState > transition > idle
-                higher priority INTERRUPTS lower; interrupted work is discarded
+                  (ordering is PERCEPTUAL — humans notice input delay most)
+                higher priority INTERRUPTS lower → the WIP tree is DISCARDED
+                  and RESTARTED (not resumed — the inputs likely changed)
                 BATCHING: React 17 = only React handlers · React 18 = EVERYWHERE
-                          (createRoot) · escape hatch: flushSync
-                "state seems async" = it's SCHEDULED, processed as a queue
+                          (createRoot routes everything through the scheduler)
+                          escape hatch: flushSync
+                "state seems async" = it's SCHEDULED (queued), plus the snapshot rule
 
-CONCURRENT      interleaving on ONE thread — NOT multithreading
-                BEFORE: every update equal priority + blocking; workaround = debounce
-                        (a timing guess that delays everything)
+CONCURRENT      interleaving on ONE thread — NOT multithreading, no parallelism
+                BEFORE: all updates equally urgent + blocking
+                        workaround = DEBOUNCE (a guessed constant, delays everyone)
                 AFTER:  startTransition / useDeferredValue mark work NON-URGENT
-                        → keystroke wins, heavy render yields, stale work discarded
-                opt-in PER UPDATE (createRoot enables it; marking activates it)
-                COSTS: render must be PURE · Strict Mode double-invokes to expose
-                       impurity · TEARING for external stores → useSyncExternalStore
+                        → keystroke commits instantly, heavy render yields,
+                          stale work is thrown away and restarted
+                ⭐ debounce = a guess about TIMING · transition = a statement of IMPORTANCE
+                opt-in PER UPDATE (createRoot enables; marking activates)
+                COSTS: render must be PURE (may run many times, results discarded)
+                       · Strict Mode double-invokes to expose impurity
+                       · TEARING at the boundary with EXTERNAL stores
+                         (React state can't tear — React keeps it consistent)
+                         → useSyncExternalStore guarantees one snapshot per pass
 
 THE PIPELINE
 State change → your function runs → React Elements (VDOM) → Fiber tree (WIP)
@@ -1242,15 +1180,15 @@ State change → your function runs → React Elements (VDOM) → Fiber tree (WI
 - **[Part 1 — Fundamentals](01-react-fundamentals.md):** §9 there walks the same `Counter` update at a beginner level — this part is the deep version.
 - **[Part 3 — JSX](03-jsx-deep-dive.md):** where React Elements come from, and the `key` rules from the consumer's side.
 - **[Part 6 — Lifecycle](06-lifecycle.md):** the render/commit split is the reason every lifecycle method sits where it does, and why the `will` methods were deprecated.
-- **[Part 7 — Hooks](07-hooks.md):** `memoizedState` on a fiber *is* the hooks linked list; `useLayoutEffect` vs `useEffect` is the commit-phase timing; `useSyncExternalStore` exists because of tearing.
-- **[Part 2 — Components](02-components.md):** `React.memo` opts out of the "parent re-renders → children re-render" default.
-- **Performance:** the Profiler, when memoization pays, list virtualization, the React Compiler.
+- **[Part 7 — Hooks](07-hooks.md):** `memoizedState` on a fiber *is* the hooks linked list; `useLayoutEffect` vs `useEffect` is commit-phase timing; `useSyncExternalStore` exists because of tearing.
+- **[Part 9 — Performance](09-performance.md):** why children re-render by default, and when memoization is actually worth it.
 - **Suspense & SSR:** streaming and selective hydration, both built on Fiber's interruptibility.
 
 ## Suggested next topics
 
-1. **Performance optimization** — recommended next; profiling, memoization, virtualization, code splitting.
-2. **Custom Hooks** — the payoff of Part 7.
+1. **Custom Hooks** — recommended next.
+2. **React Patterns** — compound components, control props, provider pattern.
 3. **Suspense, SSR & CSR** — streaming, hydration, Next.js.
 
 *— End of Part 8: Rendering Internals & the Virtual DOM —*
+
