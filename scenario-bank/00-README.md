@@ -145,19 +145,21 @@ The second belongs in the Redis topic Q&A bank.
 
 # Entry Format
 
-Each scenario should be short, spoken, and interview-oriented.
+Each scenario should be explained so **anyone can understand the underlying concept first**, then closed with how you'd actually say it in an interview.
 
 ```md
 ### "<scenario phrased the way an interviewer would ask it>"
 
-<Answer. Explain the reasoning, not just the API or keyword.>
+<Plain-language explanation. Explain the underlying idea like you're teaching it from scratch — what problem it solves, why it works the way it does — not just the keyword. Include a code snippet where one makes the mechanism concrete, not decorative.>
+
+**Interview line:** *<the short, spoken version you'd actually say out loud in an interview — the compressed soundbite version of the explanation above>*
 
 **Tests:** <concepts/reasoning being evaluated>
 
 *Axis: <failure | concurrency | scale | consistency | performance | recovery | observability | normal> · Source: <real interview | challenge question>*
 ```
 
-**Answer depth:** default to a short spoken-style answer — something the user could realistically say out loud in an interview. For a concept-heavy design scenario (e.g. an idempotency-key pattern, a caching strategy), keep the full teaching breakdown from the original conversation instead of compressing it — tables, numbered steps, code snippets, bulleted use-cases/mistakes sections are fine and should be preserved. Don't strip a technically dense answer down to one paragraph just to hit a length target; that loses reasoning content the user found valuable. If unsure which mode fits, ask.
+**Answer depth:** explain the concept in simple, plain language first — assume the reader is smart but new to this specific idea, so build it up (what breaks without it → what this does about it → how it works), rather than assuming the jargon is already understood. For a concept-heavy design scenario (e.g. an idempotency-key pattern, a caching strategy), keep the full teaching breakdown — tables, numbered steps, code snippets, bulleted use-cases/mistakes sections. Then close with a short **Interview line** — the compressed, spoken-out-loud version, for quick drilling once the concept is already understood. Don't skip straight to the interview line; the plain-language explanation is what makes the interview line actually stick instead of being memorized.
 
 This is a **working interview bank**, not a textbook — but "not a textbook" means no padding or restating the obvious, not "always short."
 
@@ -196,28 +198,42 @@ Follow-ups should be included only when they meaningfully deepen the scenario.
 
 # File Organization
 
-Create files **on demand**.
-
-Do not pre-create empty files for every technology.
+The bank is organized as **numbered topic subfolders**, one per major interview category (Distributed Systems & Reliability, API Design, Databases, Caching, Messaging, Frontend Architecture, Node.js Runtime, Security, Docker/Infra, System Design, Observability, Concurrency, File/Storage Systems, Multi-Tenancy, Offline-First). The category list and numbering live in [`00-BACKLOG.md`](00-BACKLOG.md) — that file is the source of truth for which folders exist and what's left in each.
 
 ```text
 scenario-bank/
-├── README.md
-├── nodejs.md
-├── mongodb.md
-├── redis.md
-├── angular.md
-├── react.md
-├── aws.md
-├── socket-io.md
-└── cross-cutting.md
+├── 00-README.md
+├── 00-BACKLOG.md
+├── 01-distributed-systems-reliability/
+│   └── resilience-patterns.md
+├── 02-api-design/
+│   └── api-design.md
+├── 03-databases/
+├── 04-caching/
+├── 05-messaging-event-driven/
+├── 06-frontend-architecture/
+│   └── frontend-rendering.md
+├── 07-nodejs-runtime/
+├── 08-security/
+├── 09-docker-infrastructure/
+├── 10-system-design/
+├── 11-observability/
+├── 12-concurrency/
+├── 13-file-storage-systems/
+├── 14-multi-tenancy/
+├── 15-offline-first/
+└── 16-resume-deep-dive/    ← Vishal's own resume/projects, not the generic list
 ```
 
-A file is created only when its first worthwhile scenario is added.
+`16-resume-deep-dive/` is a different flavor of entry — questions grounded in Vishal's own project decisions ("why did you choose X") rather than generic best-practice scenarios. Since only Vishal knows his actual implementation choices, these entries are frameworks-with-fill-in-prompts rather than asserted answers — see that folder's own note for the format.
+
+Within a folder, create files **on demand** — do not pre-populate every folder with placeholder files. A file is created only when its first worthwhile scenario is added, same as before; the only change is that it now lives inside its category folder instead of flat at the root.
+
+Definition-style questions (e.g. "What are ACID properties?") still need to be **scenario-ified** before they're saved — see Quality Gate. Turn "what is X" into "you have X, something happens" before it earns an entry; don't save it as a bare definition just because it's now filed under a topic folder.
 
 ### Naming
 
-Use:
+Files inside a folder:
 
 ```text
 <topic-slug>.md
@@ -226,13 +242,12 @@ Use:
 Examples:
 
 ```text
-nodejs.md
-mongodb.md
-redis.md
-socket-io.md
+03-databases/indexing.md
+03-databases/transactions-and-locking.md
+08-security/jwt-and-tokens.md
 ```
 
-Use lowercase kebab-case.
+Use lowercase kebab-case. A folder can hold multiple files once one file gets unwieldy (e.g. `03-databases/` splitting into `indexing.md`, `transactions.md`, `sharding.md` as each grows) — same "create on demand, split when it earns it" principle as the old flat structure.
 
 ---
 
