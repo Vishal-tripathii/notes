@@ -4,7 +4,7 @@
 >
 > Answers are deliberately short — the *spoken* version, not the essay. Each section links to the note that explains it properly.
 >
-> **~195 questions · 21 sections**
+> **~203 questions · 22 sections**
 
 ---
 
@@ -32,7 +32,8 @@
 | 18 | [State Management](#s18) | [Part 16](16-state-management.md) |
 | 19 | [Auth & Security](#s19) | [Part 17](17-authentication-and-authorization.md) |
 | 20 | [Testing](#s20) | [Part 20](20-testing.md) |
-| 21 | [Scenario & Debugging](#s21) ⭐ | — |
+| 21 | [Latest Angular Features](#s21) | [Part 27](27-latest-angular-features.md) |
+| 22 | [Scenario & Debugging](#s22) ⭐ | — |
 
 ---
 
@@ -711,7 +712,39 @@ Private methods, Angular's own behaviour, and implementation details. Test publi
 ---
 
 <a name="s21"></a>
-# 21. ⭐ Scenario & Debugging
+# 21. Latest Angular Features
+
+### What problem does `resource()` solve that `effect()` + `HttpClient` didn't?
+`effect()` can call `HttpClient` when a signal changes, but loading state, error state, and cancelling a stale in-flight request all had to be hand-wired. `resource()` gives you `value()`, `status()`, `error()`, and `isLoading()` as signals out of the box, and cancels the previous load automatically when its `request` signal changes.
+
+### `resource()` vs `rxResource()` vs `httpResource()`?
+Same idea, different loader shape. `resource()`'s loader returns a Promise. `rxResource()`'s returns an Observable — useful when a service already returns one. `httpResource()` is a thin wrapper specifically for an `HttpClient` GET, when you just need a URL derived from a signal.
+
+### How does `resource()` know when to re-fetch?
+Its `request` function is read like a `computed()` — any signal called inside it registers as a dependency. When one changes, the loader reruns automatically, the same dependency-tracking signals already use.
+
+### What does `provideZonelessChangeDetection()` remove, and what does that cost you?
+It removes Zone.js, so async APIs are no longer monkey-patched to trigger an automatic "check everything" pass. The cost: state that changes outside Angular's knowledge — a raw `addEventListener` callback, a third-party library's internal state — no longer triggers a view update on its own. That state needs to be a signal, or you update explicitly.
+
+### What is hydration event replay for?
+Closing the gap between a server-rendered page becoming visible and Angular finishing hydration and attaching real listeners. A click landing in that window used to be silently dropped; `withEventReplay()` captures and replays it once listeners attach.
+
+### esbuild vs Vite — what does each actually do in the new Angular build system?
+esbuild bundles for `ng build` — that's the build-speed win, since it does far less per-file work than the old webpack pipeline. Vite powers `ng serve`'s dev server, serving native ES modules so a rebuild after a file change reprocesses only that file. Different tools, different jobs — build vs dev-serve.
+
+### Does moving to Vitest change how Angular tests are written?
+No. `TestBed`, `ComponentFixture`, `HttpTestingController` are unchanged — it's a runner swap. Karma launches a real browser to run tests; Vitest runs in Node/a lightweight environment instead, which is where the speed difference comes from.
+
+### What is `@let`, and how is it different from `computed()`?
+A template-scoped, read-only local variable — `@let x = expr;` — visible only within that template block and recalculated every change-detection pass, like an interpolation. `computed()` is a class-level, memoised signal usable anywhere in the component. `@let` is for a value that only exists to make one template more readable.
+
+### Is Signal Forms something you should know deeply for an interview?
+Know that it exists and the problem it targets — form state expressed as signals instead of the separate reactive-forms Observable API. It's still experimental, so don't over-invest in its API surface; if it comes up, it's more likely a "have you heard of it" question than an implementation one.
+
+---
+
+<a name="s22"></a>
+# 22. ⭐ Scenario & Debugging
 
 > These can't be memorised, which is exactly why they're asked. Each maps to a real bug.
 
@@ -753,10 +786,10 @@ Because `disabled` is a boolean **attribute** — its presence alone disables th
 ## Before an interview
 
 ```
-1. Cover the answers. Say yours ALOUD. Section 21 first — it's the least memorisable.
+1. Cover the answers. Say yours ALOUD. Section 22 first — it's the least memorisable.
 2. Any question you stumble on → open the linked Part, reread that section only.
 3. The ⭐ sections are the highest yield: 3 (change detection), 5 (DI),
-   17 (RxJS operators), 21 (scenarios).
+   17 (RxJS operators), 22 (scenarios).
 4. Then build the projects in Part 26. Notes stop helping before an interview does.
 ```
 

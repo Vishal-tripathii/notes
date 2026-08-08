@@ -19,8 +19,9 @@
 7. [Tracking, Retry & Resume (the mechanism)](#tracking)
 8. [Virus scan & async processing](#scan)
 9. [The full architecture](#arch)
-10. [Interview Q&A](#interview)
-11. [Cheat Sheet](#cheatsheet)
+10. [⭐ The wire format — request/response JSON at every step](#wire)
+11. [Interview Q&A](#interview)
+12. [Cheat Sheet](#cheatsheet)
 
 ---
 
@@ -239,8 +240,117 @@ Every piece you've learned shows up: object storage, DB metadata, queues, CDN, s
 
 ---
 
+<a name="wire"></a>
+# 10. ⭐ The wire format — request/response JSON at every step
+
+Everything above is the *mechanism*. This is the actual **JSON that crosses the network** at each step of a chunked upload — what the frontend sends, what it gets back.
+
+## Presigned URL — definition
+
+**A presigned URL is a normal S3 URL with a temporary, cryptographically signed set of query parameters appended, granting permission to perform ONE specific action — e.g. "PUT this exact object key" — for a limited time, to whoever holds the URL, without them needing any AWS credentials of their own.**
+
+## ① FE asks the backend to start an upload
+
+```json
+POST /uploads/initiate
+{
+  "filename": "vacation-video.mp4",
+  "contentType": "video/mp4",
+  "sizeBytes": 5368709120
+}
+```
+Backend calls S3 `CreateMultipartUpload`, computes part size/count, saves a tracking record, responds:
+```json
+{
+  "fileId": "file_9f8a2b",
+  "uploadId": "2~AbCdEfGhIjKlMnOpQrSt",
+  "partSize": 8388608,
+  "totalParts": 640
+}
+```
+
+## ② FE asks for a presigned URL, per part
+
+```json
+POST /uploads/file_9f8a2b/parts/1/url
+{ "uploadId": "2~AbCdEfGhIjKlMnOpQrSt", "partNumber": 1 }
+```
+```json
+{
+  "partNumber": 1,
+  "url": "https://my-bucket.s3.amazonaws.com/uploads/42/video.mp4?partNumber=1&uploadId=2~AbCdEfGhIjKlMnOpQrSt&X-Amz-Signature=9f8a2b...&X-Amz-Expires=900",
+  "expiresIn": 900
+}
+```
+*(Often batched — one request returning URLs for several parts at once, to save round trips.)*
+
+## ③ FE sends the chunk STRAIGHT to that URL — never through the backend
+
+```
+PUT <the url from step ②>
+Body: <raw bytes of chunk 1>
+```
+S3 returns no JSON body, just a header — this is what the browser extracts from it (the "receipt" from §7):
+```json
+{ "partNumber": 1, "etag": "\"9bb58f26192e4ba00f01e2e7b136bbd8\"" }
+```
+**Repeat ② and ③ for every part number** (1, 2, 3 … 640).
+
+## ④ FE reports each finished part back to the backend (so it can track progress/resume)
+
+```json
+POST /uploads/file_9f8a2b/parts/1/complete
+{ "partNumber": 1, "etag": "\"9bb58f26192e4ba00f01e2e7b136bbd8\"" }
+```
+```json
+{ "status": "recorded", "partsCompleted": 1, "partsTotal": 640 }
+```
+
+## ⑤ FE finishes all parts — tells the backend to assemble
+
+```json
+POST /uploads/file_9f8a2b/complete
+{
+  "uploadId": "2~AbCdEfGhIjKlMnOpQrSt",
+  "parts": [
+    { "partNumber": 1,   "etag": "\"9bb58f26192e4ba00f01e2e7b136bbd8\"" },
+    { "partNumber": 2,   "etag": "\"c2e8ad55e5b0e1e0f7d9a8f6c4b3d2a1\"" },
+    { "partNumber": 640, "etag": "\"7f9a1e4d6c8b0a2f3e5d7c9b1a3f5e7d\"" }
+  ]
+}
+```
+> ⭐ This exact `{partNumber, etag}` array is forwarded unchanged to S3's own `CompleteMultipartUpload` call — S3 requires precisely this shape to reassemble parts in order.
+
+```json
+{
+  "fileId": "file_9f8a2b",
+  "status": "uploaded",
+  "location": "https://my-bucket.s3.amazonaws.com/uploads/42/video.mp4",
+  "etag": "\"a1b2c3d4e5f6...-640\""
+}
+```
+> The `-640` suffix on the final ETag is the part count — a multipart-assembled object's ETag is a hash *of the part hashes*, not a plain file hash. You can spot a multipart upload from its ETag alone.
+
+## Resume — after a full client crash, not just one failed part
+
+```json
+GET /uploads/file_9f8a2b/status
+```
+```json
+{
+  "fileId": "file_9f8a2b",
+  "uploadId": "2~AbCdEfGhIjKlMnOpQrSt",
+  "totalParts": 640,
+  "completedParts": [1, 2, 3, 5, 6],
+  "missingParts": [4, 640]
+}
+```
+FE re-requests presigned URLs (step ②) only for `missingParts`, uploads just those, then calls `/complete` (step ⑤) once all 640 are accounted for.
+
+---
+
 <a name="interview"></a>
-# 10. Interview Q&A
+# 11. Interview Q&A
 
 ### Q: "How would you design file upload?"
 > *"The key principle is separating the file from its metadata. The file goes to object storage like S3; the database stores only metadata — filename, size, owner, storage key, status. Crucially, I'd use pre-signed URLs so the browser uploads directly to object storage instead of routing bytes through my backend — the backend just issues the signed URL and tracks metadata, so it stays fast. For large files I'd use chunked multipart upload with retry and resume, and run virus scanning and thumbnailing asynchronously via a queue before marking the file available."*
@@ -263,7 +373,7 @@ Every piece you've learned shows up: object storage, DB metadata, queues, CDN, s
 ---
 
 <a name="cheatsheet"></a>
-# 11. Cheat Sheet
+# 12. Cheat Sheet
 
 ### Core principle
 - **Separate file from metadata:** file → **object storage** (S3); metadata + pointer → **DB**.
@@ -292,6 +402,17 @@ Look up record → check permission (Part 15) → pre-signed GET URL (private) o
 
 ### Async processing
 Virus scan / thumbnails via a **queue** (Part 13/14); file quarantined until "available".
+
+### Wire format ⭐ (§10)
+```
+① POST /uploads/initiate           → { fileId, uploadId, partSize, totalParts }
+② POST /uploads/.../parts/N/url    → { partNumber, url, expiresIn }
+③ PUT <url> + raw bytes            → (from headers) { partNumber, etag }
+④ POST /uploads/.../parts/N/complete → { status: "recorded", partsCompleted, partsTotal }
+⑤ POST /uploads/.../complete       → send { uploadId, parts:[{partNumber,etag}] }
+                                    → get { fileId, status:"uploaded", location, etag }
+RESUME: GET /uploads/.../status → { completedParts, missingParts } → redo ②③ for missing only
+⭐ final etag ends in "-N" (part count) → proof it was assembled via multipart
 
 ### Connects to
 - Part 2.7: CDN (serving). · Part 8: DB metadata. · Part 13/14: queues (scan/process). · Part 15: download authorization. · Part 16: signing (same idea).

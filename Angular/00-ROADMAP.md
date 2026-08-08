@@ -58,12 +58,13 @@ Step 2 is the one people skip and it's the one that separates a memorised answer
 | 24 | Legacy vs modern & migration | ⭐⭐⭐⭐☆ | ✅ done |
 | 25 | Angular vs React | ⭐⭐⭐☆☆ | ✅ done |
 | 26 | Machine coding — projects | ⭐⭐⭐⭐☆ | ✅ done |
+| 27 | Latest Angular features (post-signals) | ⭐⭐⭐☆☆ | ✅ done |
 
-> **Track complete** — every part written. Parts 14–26 were written directly to file rather than taught in chat first.
+> **Track complete** — every part written. Parts 14–27 were written directly to file rather than taught in chat first.
 >
 > **What's left is not reading.** Build the two projects in [Part 26](26-machine-coding-projects.md), then say the ⭐⭐⭐⭐⭐ answers out loud. Speaking exposes gaps that re-reading hides.
 >
-> 📋 **[Interview Question Bank](QNA-INTERVIEW-BANK.md)** — ~190 questions across 21 sections, answered in spoken form. Drill from here, not from the notes.
+> 📋 **[Interview Question Bank](QNA-INTERVIEW-BANK.md)** — ~200 questions across 22 sections, answered in spoken form. Drill from here, not from the notes.
 
 ---
 
@@ -327,13 +328,25 @@ Deliberately not another CRUD app. The point is asynchrony:
 
 ---
 
+# PHASE 6 — Staying current
+
+## Part 27 — Latest Angular features (post-signals) ⭐⭐⭐☆☆
+
+> For anyone who learned Angular around the time signals landed and hasn't tracked what shipped since.
+
+**Topics:** `resource()` / `rxResource()` / `httpResource()` — reactive async data fetching built on signal dependency-tracking · `afterRenderEffect()` · `@let` template local variables · `provideZonelessChangeDetection()` (the production zoneless API) · hydration event replay (`withEventReplay()`) · the esbuild + Vite build system (what replaced webpack, and which tool does which job) · Vitest as a newer test runner alongside Karma · self-closing component tags · Signal Forms (flagged as experimental — know it exists, don't over-invest).
+
+**Must be able to answer:** what problem `resource()` solves that `effect()` + `HttpClient` didn't · what `provideZonelessChangeDetection()` actually removes and what that costs · esbuild vs Vite, which does which job · what hydration event replay fixes.
+
+---
+
 # Interview priority — what to revise last
 
 | Priority | Topics |
 |---|---|
 | ⭐⭐⭐⭐⭐ | Components · Lifecycle · Component communication · **DI** · **RxJS** · Change detection · Routing · Reactive forms |
 | ⭐⭐⭐⭐☆ | HttpClient & interceptors · Standalone · Signals · Performance · Auth · TypeScript · Legacy vs modern · Machine coding |
-| ⭐⭐⭐☆☆ | Pipes · Directives · Internals · State management · Testing · Error handling · Patterns · Angular vs React |
+| ⭐⭐⭐☆☆ | Pipes · Directives · Internals · State management · Testing · Error handling · Patterns · Angular vs React · Latest features (`resource()`, zoneless) |
 | ⭐⭐☆☆☆ | SSR & hydration |
 
 If you have one week left, it's DI + RxJS + change detection + forms + routing. Those five carry most interviews.
@@ -365,6 +378,7 @@ A calendar, not a contract. Adjust to whatever pace the material actually takes.
 | 6 | 16 State · 17 Auth · 18 Performance · 19 Errors |
 | 7 | 20 Testing · 21 SSR · 22 Internals · 23 Patterns · 24 Legacy · 25 vs React |
 | 8 | 26 Projects + revision + mock interviews |
+| 8.5 | 27 Latest features — read once, closer to the interview date than to now |
 
 ---
 
