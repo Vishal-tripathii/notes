@@ -30,7 +30,7 @@ Step 2 is the one people skip and it's the one that separates a memorised answer
 
 | # | Part | Priority | Status |
 |---|---|---|---|
-| 00 | TypeScript for Angular | ⭐⭐⭐⭐☆ | ⬜ skipped (already comfortable) |
+| 00 | [TypeScript for Angular](00-typescript-for-angular.md) | ⭐⭐⭐⭐☆ | 🟡 in progress (2/12 topics) |
 | 01 | Angular architecture & bootstrap | ⭐⭐⭐⭐☆ | ✅ done (Q&A only) |
 | 02 | Components | ⭐⭐⭐⭐⭐ | ✅ done |
 | 03 | Templates & data binding | ⭐⭐⭐⭐☆ | ✅ done |
@@ -70,11 +70,11 @@ Step 2 is the one people skip and it's the one that separates a memorised answer
 
 # PHASE 0 — Prerequisite
 
-## Part 00 — TypeScript for Angular ⭐⭐⭐⭐☆
+## Part 00 — [TypeScript for Angular](00-typescript-for-angular.md) ⭐⭐⭐⭐☆
 
 Angular is not usable without TypeScript the way React is. Decorators, DI metadata, and typed forms all lean on it.
 
-**Topics:** interfaces · type aliases · classes & access modifiers · enums · generics · utility types (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`) · union & literal types · optional chaining `?.` · nullish coalescing `??` · non-null assertion `!` · decorators & metadata · `strict` mode and what it forces.
+**Topics:** ✅ `any` vs `unknown` · ✅ `interface` vs `type` · ⬜ type aliases · ⬜ classes & access modifiers · ⬜ enums · ⬜ generics · ⬜ utility types (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`) · ⬜ union & literal types · ⬜ optional chaining `?.` · ⬜ nullish coalescing `??` · ⬜ non-null assertion `!` · ⬜ decorators & metadata · ⬜ `strict` mode and what it forces.
 
 **Hands-on:** an `Employee` interface, a `Manager` that extends it, a generic `ApiResponse<T>`, and the same DTO expressed four ways with utility types.
 

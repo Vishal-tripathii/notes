@@ -520,6 +520,47 @@ ngOnDestroy() { this.sub.unsubscribe(); }
 
 **What doesn't leak:** HTTP Observables complete after one emission, so they clean themselves up. The risk is `Subject`, `interval`, `fromEvent`, websockets — anything infinite.
 
+### ⭐ `takeUntilDestroyed()` — how it actually works, and its one real gotcha
+
+Under the hood it's `takeUntil` automated: it reads the component's `DestroyRef` (the object Angular's DI gives every component/directive/service, with an `onDestroy(callback)` hook) and unsubscribes when that instance is torn down — replacing the manual `destroy$` Subject from fix #3.
+
+```ts
+// simplified mental model, not the real implementation
+function takeUntilDestroyed(destroyRef = inject(DestroyRef)) {
+  const destroyed$ = new Subject<void>();
+  destroyRef.onDestroy(() => { destroyed$.next(); destroyed$.complete(); });
+  return takeUntil(destroyed$);
+}
+```
+
+**The gotcha:** `inject(DestroyRef)` only works inside an **injection context** — the constructor, a field initializer, or a function called synchronously during DI setup. `ngOnInit` is *not* an injection context, even though it feels like the natural place to start a subscription:
+
+```ts
+export class TickerComponent {
+  constructor() {
+    interval(1000).pipe(takeUntilDestroyed()).subscribe();  // ✅ constructor — injection context
+  }
+
+  ngOnInit() {
+    interval(1000).pipe(takeUntilDestroyed()).subscribe();  // ❌ throws — ngOnInit is NOT an injection context
+  }
+}
+```
+
+Fix: capture `DestroyRef` where you do have context (a field initializer), and pass it in explicitly wherever you actually start the subscription:
+
+```ts
+export class TickerComponent {
+  private destroyRef = inject(DestroyRef);   // captured in field-initializer context — always safe
+
+  ngOnInit() {
+    interval(1000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();  // ✅ passed explicitly
+  }
+}
+```
+
+It only works on things Angular's DI actually manages — a plain class instantiated with `new` has no `DestroyRef` and nothing for this operator to hook into.
+
 ---
 
 <a name="together"></a>
@@ -595,6 +636,10 @@ A cold Observable creates a new producer per subscriber, so two subscribers to a
 ### Q: How do you prevent memory leaks?
 
 Prefer the `async` pipe, which unsubscribes automatically. Otherwise `takeUntilDestroyed()`, or the classic `takeUntil` with a destroy Subject placed last in the pipe, or a manual unsubscribe. HTTP calls complete on their own — the risk is infinite streams like Subjects, `interval` and `fromEvent`.
+
+### Q: Why does `takeUntilDestroyed()` throw when called in `ngOnInit`?
+
+Because it needs to `inject(DestroyRef)` internally, and that only works inside an injection context — the constructor or a field initializer, not a lifecycle hook like `ngOnInit`. The fix is to capture `DestroyRef` where there is context (a field initializer) and pass it in explicitly: `takeUntilDestroyed(this.destroyRef)`.
 
 ### Q: Where should `catchError` go?
 
