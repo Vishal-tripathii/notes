@@ -55,8 +55,9 @@ Parts 1–26 are **already written** (✅), and all 15 problems below now have a
 | 24 | Consistent hashing | ✅ done |
 | 25 | Search & inverted index | ✅ done |
 | 26 | WebSockets & realtime | ✅ done |
+| 27 | Bloom filter | ✅ done |
 
-> **All 26 parts written.** What's left is not reading — it's running the framework against unfamiliar prompts until the 9 steps come out unprompted. See the problems list below.
+> **All 27 parts written.** What's left is not reading — it's running the framework against unfamiliar prompts until the 9 steps come out unprompted. See the problems list below.
 
 ---
 
@@ -93,7 +94,7 @@ Each problem names its **signature challenge** (the one hard part a strong answe
 | Priority | Topics |
 |---|---|
 | ⭐⭐⭐⭐⭐ | Requirements+estimation · Caching (05/05.5) · Database choice+indexing · Load balancing+scaling (02/02.5/21) · The 9-step framework itself |
-| ⭐⭐⭐⭐☆ | API design · Message queues/event-driven · Auth/JWT/OAuth · CDN · CAP theorem · Consistent hashing |
+| ⭐⭐⭐⭐☆ | API design · Message queues/event-driven · Auth/JWT/OAuth · CDN · CAP theorem · Consistent hashing · Bloom filter |
 | ⭐⭐⭐☆☆ | Design patterns · Rate limiting · WebSockets/realtime · Sessions · Password hashing |
 | ⭐⭐☆☆☆ | GraphQL · Search/inverted index · File upload internals |
 

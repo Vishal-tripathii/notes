@@ -5,6 +5,8 @@
 > **Target:** interview-ready for a 2–5 year Angular role — modern Angular (standalone, signals, new control flow) **and** legacy Angular (NgModules, `*ngIf`, class guards), because real interviews and real codebases contain both.
 >
 > **Honest time estimate:** ~45–60 hours if you're learning this material, not reviewing it. RxJS and change detection are the two that eat the budget.
+>
+> **Connects to:** [typescript track](../typescript/00-ROADMAP.md) — language-level questions (interface vs type, `unknown` vs `any`, generics, utility types) live there, not here; [Part 14](../typescript/14-typescript-in-angular.md) covers the Angular-specific bits (typed forms, `inject<T>`, typed `HttpClient`) · [javascript track](../javascript/00-ROADMAP.md).
 
 ---
 

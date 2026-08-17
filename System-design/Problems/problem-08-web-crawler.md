@@ -107,7 +107,7 @@ Queue shard "other.com":   [ /x, /y, /z, ... ]
 ---
 
 <a name="dedup"></a>
-# 5. Dedup at scale — Bloom filter
+# 5. Dedup at scale — Bloom filter *(full mechanics: Part 27)*
 
 **The problem:** "have we seen this URL before?" needs to be answered on every one of billions of discovered links, and a naive hash set of full URL strings at that scale costs **~1TB+** of memory/storage (see estimation) — too expensive to keep fully in fast memory across a distributed fleet.
 

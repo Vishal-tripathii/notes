@@ -8,45 +8,214 @@
 
 ## 1. Lexical Scope & the Scope Chain
 
+**The one rule everything else follows from:**
+
+> **A function can access variables based on where the function is *written*, not where it is *called*.**
+
+That's it. The formal wording:
+
 > **Definition — Lexical Scope:** the scoping model where a variable's accessibility is determined by its physical position in the nested structure of the source code at write-time, not by the call stack at runtime.
 > **Definition — Scope Chain:** the ordered sequence of scopes — from the current scope outward to the global scope — that the engine searches, in order, when resolving a variable reference.
 
-Lexical scope = a variable's scope is fixed by **where it's written in the code**, not by how/from where the function is called — decided at write-time, by nesting, permanently.
+### Start simple
 
 ```js
 const x = 'global';
+
 function outer() {
   const y = 'outer';
+
   function inner() {
     const z = 'inner';
-    console.log(x, y, z); // 'global outer inner' — inner sees everything above it
+    console.log(x, y, z);
   }
+
   inner();
 }
 ```
 
-The **scope chain**: lookup walks outward — current → enclosing → ... → global → `ReferenceError`. Only ever outward; a function can see its parents' vars, never a sibling's or child's.
+Think of the scopes as nested boxes:
+
+```
+GLOBAL SCOPE
+└── x = "global"
+    │
+    └── outer scope
+        └── y = "outer"
+            │
+            └── inner scope
+                └── z = "inner"
+```
+
+When `inner()` runs, JavaScript resolves each name by searching **outward**:
+
+```
+Looking for z              Looking for y              Looking for x
+↓                          ↓                          ↓
+inner scope → FOUND ✅      inner scope → not found    inner scope → not found
+                           ↓                          ↓
+                           outer scope → FOUND ✅      outer scope → not found
+                                                      ↓
+                                                      global scope → FOUND ✅
+```
+
+So `z → inner`, `y → outer`, `x → global`. That walk is the **scope chain** — and if the global scope doesn't have it either, you get a `ReferenceError`.
+
+### The important rule: lookup only goes outward
+
+A nested function looks outward — `inner → outer → global`. The outer function **cannot** look inward:
+
+```js
+function outer() {
+  function inner() {
+    const secret = 123;
+  }
+  console.log(secret); // ❌ ReferenceError: secret is not defined
+}
+```
+
+Because `secret` belongs to `inner`'s scope:
+
+```
+outer
+└── inner
+    └── secret
+```
+
+`inner` can see `outer`. `outer` cannot see `inner`. Same reasoning blocks siblings from seeing each other.
+
+### Now the really important part: *lexical*
+
+```js
+const x = 'global';
+
+function foo() {
+  console.log(x);
+}
+
+function bar() {
+  const x = 'bar';
+  foo();
+}
+
+bar();
+```
+
+This prints `global` — **not** `'bar'`.
+
+Why? Because `foo` was *written* in the global scope:
+
+```
+global
+├── x = "global"
+├── foo
+│
+└── bar
+    └── x = "bar"
+```
+
+When `foo` looks for `x`, it follows its own lexical chain — `foo → global → x = "global"`. It never asks *"who called me? oh, `bar` did — I'll use `bar`'s `x`."* That would be **dynamic scoping**, and JavaScript doesn't do it. The call site is irrelevant; only the nesting in the source matters.
 
 ## 2. Closures
 
+Scope said: a function can see the variables of the scope it was written in. Closures are the one-sentence consequence of that:
+
+> **A function keeps access to the variables it was written next to — even after the function that created them has already returned.**
+
+The formal wording:
+
 > **Definition:** a closure is the combination of a function and a live reference to the lexical environment in which that function was declared — it allows the function to continue accessing the variables of its enclosing scope even after that enclosing function has finished executing.
 
-Live reference, not a value snapshot — that distinction is what the loop bug (§5) hinges on.
+### Start simple
 
 ```js
 function makeCounter() {
-  let count = 0;                 // would normally be GC'd once makeCounter() returns
+  let count = 0;
+
   return function () {
-    count++;                     // but this inner fn holds a live reference to it
+    count++;
     return count;
   };
 }
-const c1 = makeCounter(), c2 = makeCounter(); // SEPARATE closures, separate `count`
-c1(); c1();     // 1, 2
-c2();            // 1 — never shared state with c1
+
+const counter = makeCounter();
+counter(); // 1
+counter(); // 2
+counter(); // 3
 ```
 
-**Mechanically why:** in the creation phase, `outer`'s variables live in its execution context, normally popped/GC'd when `outer` returns. If the returned inner function still references `count`, the engine can't reclaim it — the closure keeps that slice of the outer context alive on the heap. Each *call* to `makeCounter` creates a fresh execution context, hence fresh, independent closures.
+Stop and notice what's strange here. `makeCounter()` **already finished** on the first line. Its execution context was popped off the call stack. Normally `count` dies with it.
+
+But `count` keeps counting. Why?
+
+### What actually happens
+
+```
+makeCounter() is called
+↓
+a new scope is created:  { count: 0 }
+↓
+the inner function is created INSIDE that scope
+   → so it is permanently wired to it (lexical scope, §1)
+↓
+makeCounter returns
+↓
+its call-stack frame is popped
+↓
+but the inner function still references { count: 0 }
+   → the engine CANNOT garbage-collect it
+   → so the scope survives on the heap
+```
+
+The picture after `makeCounter()` returns:
+
+```
+call stack:  (makeCounter's frame is gone)
+
+heap:
+  { count: 0 }  ←──── counter   (the returned function still points here)
+                       ↑
+                nothing can reach { count } except through counter()
+```
+
+That surviving box is the closure. It isn't a copy of `count` — it *is* `count`.
+
+### Live reference, not a snapshot
+
+This is the single most important detail, and the whole `var`-loop bug (§5) hinges on it:
+
+```js
+function makeCounter() {
+  let count = 0;
+  return {
+    inc:  () => ++count,
+    read: () => count,
+  };
+}
+const c = makeCounter();
+c.inc();
+c.inc();
+c.read(); // 2 — read() sees inc()'s changes
+```
+
+`inc` and `read` were written in the *same* scope, so they close over the **same live `count`** — not two frozen copies of `0`. A closure captures the variable, never its value at capture time.
+
+### Each call makes a new closure
+
+```js
+const c1 = makeCounter();
+const c2 = makeCounter();   // SEPARATE call → SEPARATE scope
+
+c1(); c1();  // 1, 2
+c2();        // 1 — never shared state with c1
+```
+
+```
+c1 ──→ { count: 2 }
+c2 ──→ { count: 1 }     two independent boxes
+```
+
+Every **call** to `makeCounter` builds a fresh execution context, so it builds a fresh `count`. Closures are created per-call, not per-function — the function is written once, but each invocation of it manufactures its own box.
 
 ## 3. Memory Retention & Leaks
 

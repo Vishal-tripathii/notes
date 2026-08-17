@@ -32,27 +32,87 @@ console.log(square(5)); // stack: [global] → [global,square] → [global,squar
 
 ## 2. Hoisting
 
+**The one rule:**
+
+> **Nothing moves. The engine learns every declaration in a scope *before* it runs the first line of that scope — but only the declaration, never the assignment.**
+
+"Hoisting" is a teaching word, not a mechanism. No code is physically lifted anywhere. It's just §1's creation phase, viewed from the outside.
+
+The formal wording:
+
 > **Definition:** the JS engine's behavior of processing variable and function declarations during the creation phase, before any code executes — making the declared name known throughout its scope from the very top, regardless of where in the code it's physically written.
 
-A direct consequence of the creation phase — declarations are known before execution starts.
+### Start simple
 
 ```js
-console.log(a);        // undefined — var hoisted, not yet assigned
+console.log(a);
 var a = 5;
-
-foo();                  // 'hi' — function declarations hoist WITH their body
-function foo() { console.log('hi'); }
-
-bar();                   // TypeError: bar is not a function
-var bar = function () { console.log('hi'); }; // only the var binding hoists (→ undefined)
+console.log(a);
 ```
 
-| Declaration | Hoisted? | Usable before its line? |
+This prints `undefined`, then `5`. Not a `ReferenceError` — the name `a` already exists on line 1.
+
+### What actually happens
+
+The engine runs the scope in two passes:
+
+```
+CREATION PHASE  (scan, don't run)        EXECUTION PHASE  (run line by line)
+─────────────────────────────────        ────────────────────────────────────
+sees:  var a                             console.log(a)   → undefined
+sets:  a = undefined                     a = 5            → assignment finally runs
+                                         console.log(a)   → 5
+```
+
+So the declaration `var a` is known from the top; the assignment `= 5` stays exactly where you wrote it. That split is the entire concept:
+
+```
+var a = 5;
+│      │
+│      └── assignment  → stays put, runs in the execution phase
+└───────── declaration → known from the start of the scope
+```
+
+### Functions are different — the body comes too
+
+```js
+foo();                          // ✅ 'hi'
+function foo() { console.log('hi'); }
+```
+
+A **function declaration** is hoisted *with its whole body*, so it's fully callable before its own line. That's why you can define helpers at the bottom of a file and call them at the top.
+
+```
+CREATION PHASE
+sees:  function foo
+sets:  foo = [the complete function]     ← not undefined
+```
+
+### The trap: function *expressions*
+
+```js
+bar();                                   // ❌ TypeError: bar is not a function
+var bar = function () { console.log('hi'); };
+```
+
+Read it as `var bar = <something>`. The engine only sees `var bar` in the creation phase — the function on the right-hand side is a *value in an assignment*, and assignments don't run early.
+
+```
+CREATION PHASE            EXECUTION PHASE
+bar = undefined     →     bar()   → calling undefined → TypeError
+                          bar = function(){...}   (too late)
+```
+
+Note the error type: **`TypeError`, not `ReferenceError`**. `bar` exists — it just isn't a function yet. Interviewers ask for that distinction specifically.
+
+### Summary table
+
+| Declaration | What the creation phase sets | Usable before its line? |
 |---|---|---|
-| `var` | binding, = `undefined` | yes, value `undefined` |
 | `function foo(){}` | binding + full body | yes, fully callable |
-| `let`/`const`/`class` | binding only, uninitialized | no — TDZ, throws |
-| fn expression via `var` | just the `var` (`undefined`) | no — calling `undefined` throws |
+| `var` | binding, = `undefined` | yes, but value is `undefined` |
+| fn expression via `var` | just the `var` (`undefined`) | no — `TypeError`, calling `undefined` |
+| `let`/`const`/`class` | binding only, uninitialized | no — `ReferenceError`, the TDZ (§3) |
 
 ## 3. The Temporal Dead Zone
 

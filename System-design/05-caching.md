@@ -190,7 +190,7 @@ A fresh/emptied cache has **0% hit ratio** — every request misses and hits the
 
 - **Thundering herd / Cache stampede** — a popular key expires; thousands of requests miss at once and hammer the DB. *Fix:* locking (one request refills, others wait), or staggered/randomized TTLs.
 - **Hot key** — one key (viral celebrity profile) gets so much traffic it overwhelms a single cache node. *Fix:* replicate the hot key across nodes.
-- **Cache penetration** — requests for data that **doesn't exist** always miss and hit the DB. *Fix:* cache the "not found" result, or a Bloom filter.
+- **Cache penetration** — requests for data that **doesn't exist** always miss and hit the DB. *Fix:* cache the "not found" result, or a Bloom filter *(Part 27)*.
 - **Cache avalanche** — many keys expire simultaneously → mass misses → DB overload. *Fix:* jitter/randomize TTLs.
 
 ---

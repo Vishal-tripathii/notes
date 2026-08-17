@@ -6,7 +6,7 @@
 >
 > **Target:** 80–85% interview coverage — strong conceptual understanding, hands-on coding, output prediction, real-world usage, and interview-oriented explanations.
 >
-> **Connects to:** [nodejs track](../nodejs/) (Part 10 here is the browser-side delta to nodejs's event loop coverage) · [Angular track](../Angular/) (RxJS/Signals build on Promises/closures here) · [scenario-bank/](../scenario-bank/) (once a part below is solid, production-failure-style follow-ups can graduate there on agreement — see that folder's README).
+> **Connects to:** [typescript track](../typescript/00-ROADMAP.md) (the type layer on top of this one — everything there erases to the JavaScript described here) · [nodejs track](../nodejs/) (Part 10 here is the browser-side delta to nodejs's event loop coverage) · [Angular track](../Angular/) (RxJS/Signals build on Promises/closures here) · [scenario-bank/](../scenario-bank/) (once a part below is solid, production-failure-style follow-ups can graduate there on agreement — see that folder's README).
 
 ---
 
