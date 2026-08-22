@@ -115,37 +115,79 @@ More on the lifecycle in [Part 07](07-lifecycle-hooks.md).
 
 The child can't call the parent. It **emits an event**, and the parent decides what that means.
 
+## What `EventEmitter` actually is
+
+It isn't an Angular-only invention bolted on from nowhere — `EventEmitter<T>` is a thin subclass of RxJS's `Subject`. `.emit(value)` is just `.next(value)` under a friendlier name. That's why you *can* technically `.subscribe()` to an `@Output()` from TypeScript, though you almost never do — the template's `(event)="handler($event)"` binding subscribes (and cleans up) for you automatically.
+
+One detail that's a real interview trap: **`.emit()` runs synchronously by default.** The parent's handler executes immediately, in the same call stack, before `.emit()` returns to whatever line called it. It is not a Promise, not debounced, not deferred to a microtask.
+
+## A full, real example
+
 ```ts
+// employee-card.component.ts
 @Component({
   selector: 'app-employee-card',
   template: `
     <div class="card">
       <h3>{{ employee.name }}</h3>
-      <button (click)="delete.emit(employee.id)">Delete</button>
+      <p>{{ employee.role }}</p>
+      <button (click)="onDeleteClick()">Delete</button>
     </div>
   `,
 })
 export class EmployeeCardComponent {
   @Input()  employee!: Employee;
-  @Output() delete = new EventEmitter<number>();
+  @Output() delete = new EventEmitter<number>();   // always type it — never leave this as EventEmitter<any>
+
+  onDeleteClick() {
+    this.delete.emit(this.employee.id);   // announces WHAT happened, not what should happen next
+  }
 }
 ```
 
-```html
-<app-employee-card
-  [employee]="emp"
-  (delete)="removeEmployee($event)" />
+```ts
+// employee-list.component.ts
+@Component({
+  selector: 'app-employee-list',
+  template: `
+    @for (emp of employees(); track emp.id) {
+      <app-employee-card [employee]="emp" (delete)="removeEmployee($event)" />
+    }
+  `,
+})
+export class EmployeeListComponent {
+  employees = signal<Employee[]>([/* ... */]);
+
+  removeEmployee(id: number) {
+    // the PARENT decides what "delete" means — confirm first, call an API, or just filter locally
+    this.employees.update(list => list.filter(e => e.id !== id));
+  }
+}
 ```
 
 ```
-Child                              Parent
-delete.emit(3)  ────────────────►  removeEmployee($event)
-                                              $event === 3
+EmployeeCardComponent                    EmployeeListComponent
+delete.emit(3)   ─────────────────────►  removeEmployee($event)
+                                                    $event === 3
 ```
 
-`$event` is whatever you passed to `emit()` — typed by the generic on `EventEmitter<number>`.
+**Why this indirection matters:** `EmployeeCardComponent` never calls an API, never touches an array, never knows it's even inside a list. It only knows *"a delete was requested for this employee."* Drop the same component into a page that shows a confirmation dialog first, and nothing inside the card changes — only the parent's `(delete)` handler does. That reusability is the entire reason `@Output` exists instead of the child reaching up and mutating shared state directly.
 
-**Why this indirection matters:** the child stays reusable. It announces *"a delete was requested"* without knowing whether the parent will show a confirmation dialog, call an API, or ignore it entirely.
+## Real use cases you'll actually build
+
+```
+Row/card component        →  (delete), (edit), (select) — child announces intent, parent decides the action
+Custom form control        →  (valueChange) — a color picker, star rating, custom dropdown
+Modal / dialog             →  (closed), (confirmed) — child reports its own outcome
+Stepper / wizard           →  (stepChange) — announces navigation, parent tracks the current step
+Infinite scroll             →  (scrolledToEnd) — child detects the DOM event, parent decides to fetch more
+```
+
+## Common `@Output` mistakes
+
+- **Leaving it untyped** (`EventEmitter<any>`) — the whole benefit of typed events is lost, and the parent gets no compile-time guarantee of the payload shape.
+- **Emitting the entire internal component state** instead of just what changed — couples the parent to the child's internal shape.
+- **Assuming `.emit()` is async** — writing code that depends on the parent's handler running "later." It runs immediately, synchronously, in the same call stack.
 
 ---
 
@@ -230,70 +272,118 @@ Decorators still work and are everywhere in existing code. Write new components 
 <a name="viewchild"></a>
 # 5. `ViewChild` — reaching into your own template
 
-Sometimes a parent needs the actual child object, not just to pass data down. Focusing an input, calling `open()` on a modal, reading a canvas.
+`@Input`/`@Output` are for *data*. Sometimes what you need instead is to **call a method directly** on a child — there's no data to pass, just an action to trigger imperatively, right now. That's what `ViewChild` is for.
+
+## A full, real example: an imperative modal
 
 ```ts
+// confirm-modal.component.ts
 @Component({
+  selector: 'app-confirm-modal',
   template: `
-    <input #searchBox />
-    <app-modal #confirmModal />
-    <button (click)="focusSearch()">Focus</button>
+    @if (visible) {
+      <div class="backdrop">
+        <div class="dialog">
+          <p>{{ message }}</p>
+          <button (click)="close()">Cancel</button>
+        </div>
+      </div>
+    }
   `,
 })
-export class PageComponent implements AfterViewInit {
-  @ViewChild('searchBox') searchBox!: ElementRef<HTMLInputElement>;
-  @ViewChild('confirmModal') modal!: ModalComponent;
+export class ConfirmModalComponent {
+  visible = false;
+  message = '';
 
-  ngAfterViewInit() {
-    this.searchBox.nativeElement.focus();
+  open(message: string) {   // an imperative API — there's no natural "input" for "open right now"
+    this.message = message;
+    this.visible = true;
   }
 
-  confirm() {
-    this.modal.open();          // calling a child component's method directly
+  close() {
+    this.visible = false;
   }
 }
 ```
 
-Two important details.
+```ts
+// employee-list.component.ts
+@Component({
+  template: `
+    <button (click)="onDeleteClick(emp)">Delete</button>
+    <app-confirm-modal #confirmModal />
+  `,
+})
+export class EmployeeListComponent {
+  @ViewChild('confirmModal') modal!: ConfirmModalComponent;   // the CHILD INSTANCE itself, not its data
 
-**On a plain element you get an `ElementRef`. On a component you get the component instance** — which is why `this.modal.open()` works.
+  onDeleteClick(emp: Employee) {
+    this.modal.open(`Delete ${emp.name}?`);   // calling a method directly — this is what ViewChild buys you
+  }
+}
+```
 
-**You can also query by type**, which is more common than by reference name:
+There genuinely isn't a clean `@Input`/`@Output` way to say *"open right now, with this message"* without over-engineering an input/output pair for a one-off imperative action. `ViewChild` is the escape hatch for exactly that.
+
+## Two important details
+
+**On a plain DOM element you get an `ElementRef`. On a component you get the actual component instance** — which is why `this.modal.open(...)` works directly.
 
 ```ts
-@ViewChild(ModalComponent) modal!: ModalComponent;
-@ViewChildren(EmployeeCardComponent) cards!: QueryList<EmployeeCardComponent>;
+@ViewChild('searchBox')    searchBox!: ElementRef<HTMLInputElement>;   // element → ElementRef
+@ViewChild('confirmModal') modal!: ConfirmModalComponent;               // component → the instance itself
+```
+
+**You can also query by type instead of template reference name** — more common in real code, since it doesn't require adding a `#ref` to the template:
+
+```ts
+@ViewChild(ConfirmModalComponent) modal!: ConfirmModalComponent;
+@ViewChildren(EmployeeCardComponent) cards!: QueryList<EmployeeCardComponent>;   // ALL matching children
 ```
 
 ## The `static` flag
 
-This one confuses people, and interviews ask it.
+This one confuses people, and interviews ask it directly.
 
 ```ts
 @ViewChild('box', { static: true })  box!: ElementRef;   // available in ngOnInit
 @ViewChild('box', { static: false }) box!: ElementRef;   // available in ngAfterViewInit (default)
 ```
 
-The rule is about **whether the element can be conditionally absent**:
+The rule is about **whether the element can possibly be conditionally absent**:
 
 ```
 Element is always in the DOM             →  static: true   → ready in ngOnInit
 Element is inside @if / @for / *ngIf     →  static: false  → ready in ngAfterViewInit
 ```
 
-If it's inside a conditional block, Angular can't resolve it before the first render — so it can't be `static`. Get this wrong and you read `undefined` in `ngOnInit`.
+`<app-confirm-modal>` above has no `@if` around it, so `static: true` would be legal there — but `static: false` (the default) is always safe, which is why most code just omits the flag rather than reasoning about it each time. Get it backwards — `static: true` on something inside a conditional block — and you read `undefined` in `ngOnInit`, because Angular hasn't resolved that block yet.
+
+## Real use cases you'll actually build
+
+```
+Imperative widgets                →  Modal.open()/close(), VideoPlayer.play()/pause(), Toast.show()
+Focus management                   →  focus the first invalid field after a failed form submit
+DOM measurement                     →  getBoundingClientRect() to position a tooltip/popover
+Wrapping a non-Angular JS library  →  handing a chart/editor library the raw <div> it needs to mount into
+Triggering animations               →  starting a CSS/Web Animations API sequence on demand
+```
+
+The common thread: **something has to happen right now, imperatively** — not "whenever this data changes." If it can be expressed as data flowing down, prefer `@Input`; reach for `ViewChild` only when you genuinely need to *call* something.
 
 ---
 
 <a name="contentchild"></a>
 # 6. ⭐ `ContentChild` — reaching into projected content
 
-Here's the distinction that matters:
+Here's the distinction that matters, and it trips people up because both sound like "get me a child":
 
 ```
-ViewChild     →  things in MY OWN template
-ContentChild  →  things the PARENT projected into me via <ng-content>
+ViewChild     →  things in MY OWN template — I wrote them, I control them
+ContentChild  →  things the PARENT projected into me via <ng-content> — I don't control what's there
 ```
+
+## Real example #1 — `ContentChildren`: a Tabs component
 
 ```html
 <!-- the parent writes this -->
@@ -312,38 +402,88 @@ ContentChild  →  things the PARENT projected into me via <ng-content>
         <button (click)="select(tab)">{{ tab.title }}</button>
       }
     </nav>
-    <ng-content />
+    <ng-content />   <!-- the actual <app-tab> content renders here -->
   `,
 })
 export class TabsComponent implements AfterContentInit {
-  @ContentChildren(TabComponent) tabs!: QueryList<TabComponent>;
+  @ContentChildren(TabComponent) tabs!: QueryList<TabComponent>;   // MULTIPLE projected children
 
   ngAfterContentInit() {
-    this.tabs.first.active = true;   // available HERE, not in ngOnInit
+    this.tabs.first.active = true;   // available HERE, not in ngOnInit — the projected content wasn't ready yet
+  }
+
+  select(tab: TabComponent) {
+    this.tabs.forEach(t => t.active = (t === tab));
   }
 }
 ```
 
-The tabs weren't written by `TabsComponent` — they were handed to it. That's why they arrive at `ngAfterContentInit` and not `ngAfterViewInit`.
+`TabsComponent` never wrote `<app-tab title="Profile">` — the *parent* did. That's exactly why the query resolves in `ngAfterContentInit` and not `ngOnInit`: Angular has to finish projecting the parent's content into `<ng-content>` first.
 
-This is the whole reason Angular has two sets of lifecycle hooks:
+## Real example #2 — `ContentChild` (singular): a form-field wrapper
+
+This is the pattern behind every UI library's form-field wrapper component (`mat-form-field` and equivalents) — it shows a label and an error message around *whatever input the caller projects in*, without knowing in advance what that input actually is.
+
+```html
+<!-- the parent decides what goes inside — could be any control -->
+<app-form-field label="Email">
+  <input formControlName="email" />
+</app-form-field>
+```
+
+```ts
+@Component({
+  selector: 'app-form-field',
+  template: `
+    <label>{{ label }}</label>
+    <ng-content />
+    @if (control?.invalid && control?.touched) {
+      <span class="error">This field is required</span>
+    }
+  `,
+})
+export class FormFieldComponent implements AfterContentInit {
+  @Input() label = '';
+  @ContentChild(NgControl) control?: NgControl;   // ONE projected control — whatever it turns out to be
+
+  ngAfterContentInit() {
+    // control is now the projected <input formControlName="email">'s NgControl
+  }
+}
+```
+
+`FormFieldComponent` has no idea whether the caller will project an `<input>`, a `<select>`, or a custom control — `ContentChild(NgControl)` reads whatever was actually projected and reacts to *its* validity. That's the whole reason this pattern scales to an entire component library instead of one hardcoded field type.
+
+## `ContentChild` vs `ContentChildren`
 
 ```
-ngAfterContentInit  →  projected content is ready   (ContentChild)
-ngAfterViewInit     →  my own template is ready     (ViewChild)
+ContentChild(Type)      →  ONE projected match      →  the form-field reading its single projected control
+ContentChildren(Type)   →  QueryList of ALL matches  →  tabs reading every projected <app-tab>
 ```
+
+Same singular/plural split as `ViewChild`/`ViewChildren` — it isn't a different concept, just "one" vs "all."
+
+## Why two sets of lifecycle hooks exist
+
+```
+ngAfterContentInit  →  projected content is ready   (ContentChild / ContentChildren)
+ngAfterViewInit     →  my own template is ready     (ViewChild / ViewChildren)
+```
+
+Content arrives from the parent and gets projected in *before* the component finishes rendering its own template around it — that ordering is exactly why content resolves first.
 
 ## Signal queries
 
-The modern equivalents avoid the timing problem entirely:
+The modern equivalents avoid the timing problem entirely — no hook to remember, no `static` flag:
 
 ```ts
 searchBox = viewChild<ElementRef>('searchBox');
 tabs      = contentChildren(TabComponent);
-modal     = viewChild.required(ModalComponent);
+modal     = viewChild.required(ConfirmModalComponent);
+control   = contentChild(NgControl);
 ```
 
-They're signals, so you read them whenever you like and get `undefined` until they exist. No `static` flag, no hook to remember.
+They're signals, so you read them (`this.tabs()`) whenever you like and get `undefined` until they actually exist — no more guessing which lifecycle hook is "early enough."
 
 ---
 
@@ -413,9 +553,10 @@ One guideline worth internalising: **prefer inputs and outputs**. `ViewChild` co
 # 9. Common mistakes
 
 - **Mutating an `@Input` object inside the child.** The parent owns that object; mutate it and the parent's state changes behind its back. Emit an event instead.
+- **Assuming `EventEmitter.emit()` is asynchronous.** It runs the parent's handler synchronously, in the same call stack — code that depends on it "happening later" is a real bug.
 - **Reading a `ViewChild` in `ngOnInit`** without `static: true` → `undefined`.
 - **Using `static: true` on an element inside `@if`** → also `undefined`, because it may not exist yet.
-- **Confusing `ViewChild` with `ContentChild`** — own template vs projected content.
+- **Confusing `ViewChild` with `ContentChild`** — own template vs projected content — and **`ContentChild` with `ContentChildren`** — one match vs a `QueryList` of all matches.
 - **Forgetting `()` on signal inputs** — `employee.name` is undefined; `employee().name` is the value.
 - **Prop drilling five levels deep** instead of using a service.
 
@@ -430,7 +571,15 @@ Parent to child through `@Input`, child to parent through `@Output` with an `Eve
 
 ### Q: `ViewChild` vs `ContentChild`?
 
-`ViewChild` queries elements in the component's **own** template. `ContentChild` queries elements the parent **projected in** through `ng-content`. They resolve at different times too — content in `ngAfterContentInit`, view in `ngAfterViewInit`.
+`ViewChild` queries elements in the component's **own** template. `ContentChild` queries elements the parent **projected in** through `ng-content`. They resolve at different times too — content in `ngAfterContentInit`, view in `ngAfterViewInit`. A real example: a Tabs component uses `ContentChildren` to read the `<app-tab>` elements the caller projected in; a Modal component's caller uses `ViewChild` to call `.open()` on it directly.
+
+### Q: Is `EventEmitter.emit()` synchronous or asynchronous?
+
+Synchronous by default. `EventEmitter<T>` is a thin wrapper over RxJS's `Subject`, and `.emit()` is just `.next()` — the parent's handler runs immediately, in the same call stack, before `.emit()` returns. It's not a Promise and isn't deferred to a microtask, which matters if code after the `.emit()` call assumes the parent hasn't reacted yet.
+
+### Q: When would you actually reach for `ViewChild` in a real app instead of `@Input`/`@Output`?
+
+Whenever the interaction is a one-off imperative action rather than data flowing through the tree — opening a modal, focusing an input after a failed validation, calling `play()`/`pause()` on a video player, or handing a raw DOM node to a non-Angular library like a chart or rich-text editor. If it can be expressed as data, `@Input` stays the better default; `ViewChild` is for "call this method right now."
 
 ### Q: What does the `static` flag do?
 
@@ -453,7 +602,7 @@ No — the parent owns it, and mutating it changes the parent's state invisibly.
 <a name="summary"></a>
 # 11. The 60-second summary
 
-> *"Angular components communicate along the tree. Parent to child is `@Input`, which is really just property binding onto a component instead of a DOM element, and child to parent is `@Output` with an `EventEmitter` — the child announces that something happened without knowing what the parent will do about it. Two-way binding is those two combined under the `x` / `xChange` convention. Modern Angular replaces the decorators with `input()`, `output()` and `model()`, which are signal-based, so inputs compose directly with `computed` instead of needing setters or `ngOnChanges`. When a parent needs the child object itself, `ViewChild` queries its own template and `ContentChild` queries content projected in through `ng-content` — which is why there are separate `ngAfterViewInit` and `ngAfterContentInit` hooks, and why the `static` flag exists for elements that might not be rendered yet. And for components that aren't parent and child at all, the answer is a shared service provided in root, holding state in a signal."*
+> *"Angular components communicate along the tree. Parent to child is `@Input`, which is really just property binding onto a component instead of a DOM element, and child to parent is `@Output` with an `EventEmitter` — a thin wrapper over RxJS's `Subject` that emits synchronously, so the parent's handler runs immediately in the same call stack. The child announces that something happened without knowing what the parent will do about it. Two-way binding is those two combined under the `x` / `xChange` convention. Modern Angular replaces the decorators with `input()`, `output()` and `model()`, which are signal-based, so inputs compose directly with `computed` instead of needing setters or `ngOnChanges`. When a parent needs to call a method directly on a child — open a modal, focus an input, wrap a non-Angular library — `ViewChild` reaches into its own template; `ContentChild`/`ContentChildren` reaches into content the parent projected in through `ng-content`, which is why there are separate `ngAfterViewInit` and `ngAfterContentInit` hooks, and why the `static` flag exists for elements that might not be rendered yet. And for components that aren't parent and child at all, the answer is a shared service provided in root, holding state in a signal."*
 
 ---
 

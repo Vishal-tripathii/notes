@@ -5,6 +5,8 @@
 > **Roadmap:** [Part 18](00-ROADMAP.md) · **Priority:** ⭐⭐⭐⭐☆
 >
 > **Continues:** [Part 10 — Change Detection](10-change-detection-and-zonejs.md) · [Part 11 — Signals](11-signals.md) · [Part 14 — Routing](14-routing.md).
+>
+> Each technique below has a quick ⇄ **React** snippet — the full framework-level comparison (philosophy, trade-offs) is [Part 25](25-angular-vs-react.md).
 
 ---
 
@@ -14,7 +16,7 @@
 2. [The two kinds of slow](#two-kinds)
 3. [Runtime: `OnPush`](#onpush) ⭐
 4. [Runtime: keep templates cheap](#templates) ⭐
-5. [Runtime: `track`](#track)
+5. [Runtime: `track` (and legacy `trackBy`)](#track)
 6. [Runtime: virtual scrolling](#virtual)
 7. [Runtime: stay out of the zone](#zone)
 8. [Load: lazy routes](#lazy)
@@ -77,6 +79,15 @@ The contract is immutability — mutate an input object and the reference doesn'
 
 **Practical advice:** apply it to every new component by default. Retrofitting it onto an app that mutates freely is much harder than starting with it.
 
+⇄ **React:**
+
+```tsx
+const Chart = React.memo(function Chart({ data }: { data: Data }) {
+  return <canvas ... />;
+});
+// same contract as OnPush: memo only skips a re-render if props are REFERENCE-equal
+```
+
 ---
 
 <a name="templates"></a>
@@ -102,10 +113,17 @@ computed()    →  only when a dependency changes
 
 Same rule for getters — a getter is a method call wearing a disguise.
 
+⇄ **React:** the identical trap, JSX instead of a template —
+
+```tsx
+<div>{calculateTotal()}</div>                              {/* ❌ runs every render */}
+<div>{useMemo(() => calculateTotal(), [items])}</div>       {/* ✅ cached until items changes */}
+```
+
 ---
 
 <a name="track"></a>
-# 5. Runtime: `track`
+# 5. Runtime: `track` (and legacy `trackBy`)
 
 ```html
 @for (item of items; track item.id) { … }
@@ -113,7 +131,26 @@ Same rule for getters — a getter is a method call wearing a disguise.
 
 Without a stable identity, Angular compares by object reference. Refetch a list and every object is new, so every row is destroyed and rebuilt — losing focus, scroll position and animations ([Part 04](04-directives.md)).
 
-`@for` makes `track` mandatory. `*ngFor` didn't, which is why so much legacy code silently rebuilds lists.
+```
+track      →  keyword, used with the modern @for block         →  MANDATORY, compile error without it
+trackBy    →  a function you pass to the legacy *ngFor          →  OPTIONAL, easy to forget
+```
+
+```html
+<!-- legacy *ngFor, for contrast -->
+<li *ngFor="let item of items; trackBy: trackById">{{ item.name }}</li>
+```
+```ts
+trackById(index: number, item: Item) { return item.id; }
+```
+
+`@for` makes `track` mandatory precisely because `trackBy` being optional is why so much legacy code silently rebuilds lists — full breakdown in [Part 04](04-directives.md#trackby).
+
+⇄ **React:**
+
+```tsx
+{items.map(item => <Row key={item.id} {...item} />)}   // same rule: a stable key, never the array index
+```
 
 ---
 
@@ -134,6 +171,16 @@ Without a stable identity, Angular compares by object reference. Refetch a list 
 
 Requires `@angular/cdk`. The fix when a table is slow no matter what else you do.
 
+⇄ **React:**
+
+```tsx
+import { FixedSizeList } from 'react-window';
+
+<FixedSizeList height={600} itemCount={10000} itemSize={50}>
+  {({ index, style }) => <div style={style}>{items[index].name}</div>}
+</FixedSizeList>
+```
+
 ---
 
 <a name="zone"></a>
@@ -143,7 +190,7 @@ A `mousemove` handler triggers a full change detection cycle 60 times a second:
 
 ```ts
 this.zone.runOutsideAngular(() => {
-  window.addEventListener('mousemove', this.track);
+  window.addEventListener('mousemove', this.onMouseMove);
 });
 
 // re-enter only when there's something to show
@@ -151,6 +198,14 @@ this.zone.run(() => this.position.set(coords));
 ```
 
 For animations, canvas work, scroll tracking, and third-party libraries with their own render loop.
+
+⇄ **React:** no Zone.js to opt out of — React only re-renders on `setState`, so the equivalent discipline is keeping high-frequency data OUT of state until there's something to actually show:
+
+```tsx
+const posRef = useRef({ x: 0, y: 0 });
+window.addEventListener('mousemove', e => { posRef.current = { x: e.clientX, y: e.clientY }; }); // no re-render at all
+setPosition(coords);   // only call this when the UI actually needs to update
+```
 
 ---
 
@@ -167,6 +222,16 @@ For animations, canvas work, scroll tracking, and third-party libraries with the
 The dynamic `import()` creates a separate bundle chunk, downloaded only when the route is visited ([Part 14](14-routing.md)). The highest-leverage fix for a slow first paint.
 
 Add `withPreloading(PreloadAllModules)` to fetch chunks in the background afterwards, so navigation still feels instant.
+
+⇄ **React:**
+
+```tsx
+const AdminRoutes = React.lazy(() => import('./AdminRoutes'));
+
+<Suspense fallback={<Spinner />}>
+  <AdminRoutes />
+</Suspense>
+```
 
 ---
 
@@ -201,6 +266,18 @@ prefetch on ...   download early, render later
 
 Before `@defer`, a heavy chart below the fold was in your initial bundle whether or not anyone scrolled to it.
 
+⇄ **React:** same idea, but no built-in "on viewport" trigger — you supply that part yourself:
+
+```tsx
+const HeavyChart = React.lazy(() => import('./HeavyChart'));
+
+{inViewport && (              // inViewport from your own IntersectionObserver hook
+  <Suspense fallback={<Skeleton />}>
+    <HeavyChart data={data} />
+  </Suspense>
+)}
+```
+
 ---
 
 <a name="budgets"></a>
@@ -223,6 +300,16 @@ Before `@defer`, a heavy chart below the fold was in your initial bundle whether
 ```
 
 `NgOptimizedImage` enforces width/height (preventing layout shift), lazy-loads below-the-fold images automatically, and `priority` preloads the one that matters for LCP.
+
+⇄ **React:**
+
+```tsx
+<img src="hero.jpg" width={800} height={400} loading="eager" fetchPriority="high" />
+// or, in Next.js:
+<Image src="/hero.jpg" width={800} height={400} priority />
+```
+
+Bundle budgets aren't built into CRA/Vite the way `angular.json` has them — enforced instead via `size-limit` or a webpack/Vite bundle-visualizer CI check.
 
 ---
 
@@ -269,5 +356,6 @@ Size limits in `angular.json` that fail the build when the bundle crosses them. 
 - **[Part 10 — Change Detection](10-change-detection-and-zonejs.md):** what `OnPush` and `runOutsideAngular` are doing.
 - **[Part 14 — Routing](14-routing.md):** lazy loading and preloading.
 - **[Part 21 — SSR](21-ssr-and-hydration.md):** the other lever on first paint.
+- **[Part 25 — Angular vs React](25-angular-vs-react.md):** the framework-level version of the ⇄ React comparisons above.
 
 *— End of Part 18 —*
