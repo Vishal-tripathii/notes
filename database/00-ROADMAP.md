@@ -1,6 +1,6 @@
 # 🗄️ Database & MongoDB Study Notes — Master Roadmap
 
-> **Purpose:** the full study plan for the database track — SQL fundamentals, MongoDB in depth, and Redis, in the order a Node/full-stack interview actually probes them. 20 parts, each becoming a note file in this folder (`NN-topic-slug.md`), written after the topic is explained in chat — same convention as [Angular](../Angular/00-ROADMAP.md), [nodejs](../nodejs/), and [javascript](../javascript/00-ROADMAP.md).
+> **Purpose:** the full study plan for the database track — SQL fundamentals, MongoDB in depth, and Redis, in the order a Node/full-stack interview actually probes them. 22 parts (20 core + Part 04.5 and Part 20 added for foreign-key/cascading coverage and a consolidated SQL vs NoSQL comparison), each becoming a note file in this folder (`NN-topic-slug.md`), written after the topic is explained in chat — same convention as [Angular](../Angular/00-ROADMAP.md), [nodejs](../nodejs/), and [javascript](../javascript/00-ROADMAP.md).
 >
 >
 > **Target:** interview-ready for a Node.js + MongoDB role (per [the JD this repo is tracking](../nodejs/JD-NodeFullStack-3YR-QNA.md)) — SQL to the depth a full-stack interview expects (joins, indexes, transactions), MongoDB in real depth since it's a JD must-have, Redis to the depth it's actually used (caching, not Redis-as-a-database).
@@ -29,28 +29,30 @@ Step 3 is the one that turns "I know the syntax" into "I can explain why it's sl
 
 | # | Part | Priority | Status |
 |---|---|---|---|
-| 00 | SQL Basics | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 01 | Joins | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 02 | SQL Indexes | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 03 | Query Optimization & `EXPLAIN` | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 04 | Transactions & ACID | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 05 | MongoDB Fundamentals | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 06 | MongoDB Indexes | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 07 | Populate & the N+1 Problem | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 08 | Aggregation Pipeline | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 09 | Schema Design — Embedding vs Referencing | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 10 | Pagination | ⭐⭐⭐⭐☆ | ⬜ not started |
-| 11 | Redis Basics & Caching | ⭐⭐⭐⭐☆ | ⬜ not started |
-| 12 | Connection Pooling | ⭐⭐⭐☆☆ | ⬜ not started |
-| 13 | Replication | ⭐⭐⭐☆☆ | ⬜ not started |
-| 14 | Sharding | ⭐⭐⭐☆☆ | ⬜ not started |
-| 15 | MongoDB Transactions & Concurrency | ⭐⭐⭐☆☆ | ⬜ not started |
-| 16 | Advanced SQL (Window Functions, CTEs, Full-Text Search) | ⭐⭐☆☆☆ | ⬜ not started |
-| 17 | Advanced Indexing & Partitioning | ⭐⭐☆☆☆ | ⬜ not started |
-| 18 | Production Scenario Practice | ⭐⭐⭐⭐⭐ | ⬜ not started |
-| 19 | Machine Coding — Query & Aggregation Practice | ⭐⭐⭐⭐☆ | ⬜ not started |
+| 00 | SQL Basics | ⭐⭐⭐⭐⭐ | ✅ done |
+| 01 | Joins | ⭐⭐⭐⭐⭐ | ✅ done |
+| 02 | SQL Indexes | ⭐⭐⭐⭐⭐ | ✅ done |
+| 03 | Query Optimization & `EXPLAIN` | ⭐⭐⭐⭐⭐ | ✅ done |
+| 04 | Transactions & ACID | ⭐⭐⭐⭐⭐ | ✅ done |
+| 04.5 | Foreign Keys, Cascading & Referential Integrity | ⭐⭐⭐⭐☆ | ✅ done |
+| 05 | MongoDB Fundamentals | ⭐⭐⭐⭐⭐ | ✅ done |
+| 06 | MongoDB Indexes | ⭐⭐⭐⭐⭐ | ✅ done |
+| 07 | Populate & the N+1 Problem | ⭐⭐⭐⭐⭐ | ✅ done |
+| 08 | Aggregation Pipeline | ⭐⭐⭐⭐⭐ | ✅ done |
+| 09 | Schema Design — Embedding vs Referencing | ⭐⭐⭐⭐⭐ | ✅ done |
+| 10 | Pagination | ⭐⭐⭐⭐☆ | ✅ done |
+| 11 | Redis Basics & Caching | ⭐⭐⭐⭐☆ | ✅ done |
+| 12 | Connection Pooling | ⭐⭐⭐☆☆ | ✅ done |
+| 13 | Replication | ⭐⭐⭐☆☆ | ✅ done |
+| 14 | Sharding | ⭐⭐⭐☆☆ | ✅ done |
+| 15 | MongoDB Transactions & Concurrency | ⭐⭐⭐☆☆ | ✅ done |
+| 16 | Advanced SQL (Window Functions, CTEs, Full-Text Search) | ⭐⭐☆☆☆ | ✅ done |
+| 17 | Advanced Indexing & Partitioning | ⭐⭐☆☆☆ | ✅ done |
+| 18 | Production Scenario Practice | ⭐⭐⭐⭐⭐ | ✅ done |
+| 19 | Machine Coding — Query & Aggregation Practice | ⭐⭐⭐⭐☆ | ✅ done |
+| 20 | SQL vs NoSQL — Point-by-Point Comparison | ⭐⭐⭐⭐⭐ | ✅ done |
 
-> Nothing written yet — parts get filled in as we study them together.
+> All 22 parts written. Part 20 is cross-linked from every part throughout this track wherever a SQL/NoSQL comparison naturally comes up (Joins, Indexes, Transactions, Aggregation, Embedding, Sharding) rather than duplicated in each — revisit Part 20 itself for the consolidated view. Revisit per the suggested schedule/priority table below rather than treating this as a one-time read.
 
 ---
 
