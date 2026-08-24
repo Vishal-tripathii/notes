@@ -15,6 +15,7 @@
 7. [Database](#db)
 8. [Scaling](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -198,6 +199,75 @@ domain(PK/shard key) | url | priority | discoveredAt | status(queued/in-progress
 
 ---
 
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+The reference design for a production crawler is **Mercator** (the architecture behind AltaVista's crawler, and the model most modern crawlers still follow). Two things it does that §4 and §5 above don't fully capture — and the second is a genuine gap.
+
+### ① The frontier is *two* layers of queues, not one
+
+§4 correctly says "partition by domain." Mercator refines that into a **two-stage** structure, because priority and politeness are **different constraints that conflict**, and one queue can't serve both.
+
+```
+   discovered URLs
+        │
+        ▼
+ ┌─────────────────────────────────────┐
+ │  FRONT QUEUES  — one per PRIORITY   │   "what's most worth crawling?"
+ │  band (e.g. high/medium/low)        │
+ │  [P0] [P1] [P2] ... [Pn]            │
+ └─────────────────────────────────────┘
+        │  a router pulls from front queues,
+        │  biased toward higher priority
+        ▼
+ ┌─────────────────────────────────────┐
+ │  BACK QUEUES — one per HOST,        │   "am I allowed to hit this host yet?"
+ │  each with its own delay timer      │
+ │  [host A] [host B] [host C] ...     │
+ └─────────────────────────────────────┘
+        │  a worker takes from a back queue only when
+        │  that host's timer has elapsed
+        ▼
+     fetch
+```
+
+**Why two layers is the right structure:** a single priority queue would happily hand you ten consecutive high-priority URLs from the *same* host — violating politeness. A single per-host queue enforces politeness but loses all priority ordering across hosts. Splitting them means **front queues own "what to crawl next," back queues own "when am I allowed to."** Each back queue holds URLs for **exactly one host**, and a per-host timer enforces the minimum delay — honouring `robots.txt`'s `Crawl-delay` where present, and a default (commonly ~1s) where not.
+
+> **Say this:** *"Priority and politeness are conflicting constraints, so I'd separate them into two queue layers rather than trying to encode both in one ordering — front queues by priority band answer 'what next,' back queues one-per-host with a delay timer answer 'when.' That's the Mercator design and it's the standard structure."*
+
+### ② Content dedup ≠ URL dedup — the real gap
+
+§5 covers **URL** dedup with a Bloom filter. But the bigger problem in practice is **the same content behind different URLs**:
+
+- `example.com/page`, `example.com/page?utm_source=x`, `example.com/page#section`, `www.example.com/page` — same page, four URLs
+- Mirror sites, syndicated news articles, printer-friendly versions, paginated duplicates
+
+Three layers, in increasing order of difficulty:
+
+| Layer | Catches | Technique |
+|---|---|---|
+| **URL normalization** | Trivially-different URLs | Lowercase host, strip fragments and known tracking params, sort query params, resolve relative paths, strip default ports. **Do this before the Bloom filter** — otherwise you cache four entries for one page. |
+| **Exact content dedup** | Byte-identical pages at different URLs | Cryptographic hash (SHA-256) of the normalized content body; keep a hash set / Bloom filter of seen hashes |
+| **Near-duplicate detection** | ~95% similar pages — the hard and common case | **SimHash** or **MinHash** over content **shingles** (overlapping n-grams of words) |
+
+**Why near-duplicate detection needs a special structure:** a cryptographic hash is useless here by design — change one character and the hash is completely different, which is the opposite of what you want. **SimHash is a *locality-sensitive* hash: similar documents produce similar hashes**, so near-duplicates land within a small Hamming distance of each other. You can then find them by looking for hashes within, say, 3 bits — which is a tractable lookup, unlike comparing every document against every other.
+
+> This is the strongest unprompted addition to this problem. Most candidates dedup URLs and stop; naming that near-duplicate *content* detection is a separate problem requiring a locality-sensitive hash is a clear differentiator.
+
+### ③ Politeness is more than a delay
+
+The full set of behaviours a well-behaved crawler implements — cheap to list, and shows operational awareness:
+
+- **Respect `robots.txt`** — fetch and cache per host, refresh periodically, honour `Crawl-delay`.
+- **Identify yourself** in the `User-Agent`, with a URL explaining the crawler and how to contact you.
+- **Cap concurrent connections per host** — typically **1–2**, independent of the delay between requests.
+- **Exponential backoff on errors** — a host returning 5xx or timing out is likely struggling; crawling it harder is actively harmful.
+- **Honour `429` / `Retry-After`** rather than treating it as a generic failure.
+
+> The framing that lands: *"Politeness isn't only a rate limit — it's a delay per host, a cap on concurrent connections per host, exponential backoff when a host is erroring, and honouring robots.txt including Crawl-delay. Getting this wrong doesn't just get you blocked, it means you're effectively running a DoS against sites that never opted in."*
+
+---
+
 <a name="interview"></a>
 # 10. Interview Q&A
 
@@ -229,5 +299,12 @@ domain(PK/shard key) | url | priority | discoveredAt | status(queued/in-progress
 - **DB:** blob storage for raw pages + NoSQL metadata (urlHash key); durable partitioned queue for frontier persistence, partitioned by domain.
 - **Scale:** horizontal workers (thin remap via consistent hashing), domain-level parallelism, async pipeline stages (fetch/parse/dedup/enqueue), cached robots.txt + rate budgets.
 - **Bottleneck to name:** one domain's rate limit is a hard ceiling — can't scale around it with more compute, only with more time.
+
+
+**Real-world grounding (§9.5) — the Mercator design:**
+- **Frontier is TWO queue layers, not one:** front queues by **priority band** ("what next") → back queues **one per host + delay timer** ("when am I allowed"). Priority and politeness are conflicting constraints; one ordering can't serve both.
+- **Content dedup ≠ URL dedup** (the common gap). Three layers: **URL normalization** (strip fragments/tracking params, sort query, lowercase host — do this *before* the Bloom filter) → **exact content hash** (SHA-256 of body) → **near-duplicate via SimHash/MinHash over shingles**.
+- **SimHash is locality-sensitive** — similar docs get *similar* hashes, so near-dupes sit within a small Hamming distance. A cryptographic hash is useless here by design.
+- **Politeness ≠ just a delay:** per-host delay (honour `Crawl-delay`) + **cap 1–2 concurrent connections/host** + **exponential backoff on 5xx** + honour `429`/`Retry-After` + identify in `User-Agent`. Getting it wrong is effectively a DoS on sites that never opted in.
 
 *— Design Problem 08 complete —*

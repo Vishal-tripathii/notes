@@ -15,6 +15,7 @@
 7. [Load Balancer + HA](#lb)
 8. [Scaling](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -197,6 +198,52 @@ Order of impact: **in-memory route config (removes a DB hit from the hot path) �
 
 Config stores: [Route Config DB]  [API-Key/Auth Store]   ← small, read-mostly, cached in-memory/Redis
 ```
+
+---
+
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+§4's pipeline is the right model — and it's worth knowing that it *is* the industry-standard model, because naming the lineage is cheap credibility.
+
+### The filter-pipeline pattern is the standard, and it came from Zuul
+
+Netflix's **Zuul** established the shape that essentially every gateway now uses:
+
+```
+   request -> [ PRE filters ]  -> authN/authZ, rate limit, validate, enrich
+            -> [ ROUTE filter ] -> pick a backend, forward
+            -> [ POST filters ] -> transform response, add headers, log, meter
+            -> [ ERROR filters ] -> handle anything that threw along the way
+```
+
+**Spring Cloud Gateway, Kong, and AWS API Gateway all adopted this same Pre/Route/Post/Error structure.** Saying "this is the Zuul filter-pipeline pattern, which is what Kong and AWS API Gateway also use" positions the design as the known-good answer rather than something invented on the spot.
+
+**Zuul 2's headline change was going asynchronous and non-blocking** — and the reason generalizes directly to this problem. A gateway is almost entirely **I/O-bound**: it spends its life waiting on backends. With a thread-per-request model, every waiting request pins a thread, so concurrency is capped by thread count and a single slow backend can exhaust the pool and take down routing for *every* service. Async/event-loop decouples in-flight requests from threads. **This is the same insight as WhatsApp's connection model in [Problem 06 §9.5](problem-06-whatsapp-chat.md#realworld)**: when the work is waiting rather than computing, thread-per-unit-of-work is the wrong primitive.
+
+### The other gateways, and why you'd pick each
+
+| Gateway | Built on | Picked for |
+|---|---|---|
+| **Kong** | NGINX + OpenResty | Plugin architecture, very high throughput, mature ecosystem |
+| **Envoy** | C++, purpose-built | Doubles as **service-mesh data plane** (Istio); rich traffic-shaping and observability |
+| **Zuul / Spring Cloud Gateway** | JVM | Deep integration with a JVM microservice stack (Eureka discovery, Hystrix breakers) |
+
+### Service discovery — the piece §4 assumes
+
+The gateway has to know **where the backends are**, and in an autoscaling environment that changes continuously. Netflix's stack is the canonical illustration: **Eureka** (service registry) + **Ribbon** (client-side load balancing) — the gateway queries the registry for live instances rather than holding a static list, then load-balances across them itself.
+
+The distinction worth drawing:
+- **Server-side LB** — gateway forwards to a load balancer, which picks an instance. One more hop, one more thing to run.
+- **Client-side LB** — the gateway *is* the load balancer: it holds the instance list from the registry and picks directly. Fewer hops, but the gateway now owns health-checking and balancing logic.
+
+Either is defensible; naming that the choice exists is the signal.
+
+### Circuit breakers — and the rule about what traffic belongs here
+
+Netflix's **Hystrix** popularized isolating calls to remote systems so a failing dependency can't cascade. The gateway is the natural place for it: it sits in front of everything, so it can fail fast on a dead backend and return a degraded response instead of holding connections open until they time out. Combine with **bulkheads** — separate connection pools per backend — so one saturated service can't consume the gateway's entire capacity (Part 22).
+
+> **The rule to state, because it's the most common architectural mistake:** *"Only external, north-south traffic should go through the gateway. Routing internal service-to-service traffic through it adds a hop of latency for no benefit and turns the gateway into both a bottleneck and a single point of failure for the entire system. East-west traffic belongs in a service mesh or direct calls."*
 
 ---
 

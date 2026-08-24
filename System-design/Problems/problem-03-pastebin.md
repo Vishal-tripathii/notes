@@ -15,6 +15,7 @@
 7. [Expiry mechanism](#expiry)
 8. [Scaling](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -177,6 +178,43 @@ Order of impact: **cache → horizontal app servers → object storage + CDN for
 
 ID gen: [Machine-ID prefix + local counter Base62]  (reused from problem-01)
 ```
+
+---
+
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+Pastebin is the simplest problem in the folder, so the honest note first: **there is no famous published architecture to borrow here.** What *is* worth grounding is the signature challenge — **expiry at scale** — because the naive answer is a real production hazard.
+
+### The naive answer, and why it fails
+
+```sql
+-- run every minute
+DELETE FROM pastes WHERE expires_at < NOW();
+```
+
+At scale this is genuinely dangerous:
+- It scans and deletes potentially **millions of rows in one transaction**, holding locks and bloating the transaction log.
+- Deletes are **more expensive than inserts** in most engines — they dirty index pages, leave dead tuples (Postgres) or tombstones (Cassandra) behind, and require a later vacuum/compaction to actually reclaim space.
+- In Cassandra specifically, mass deletion creates **tombstones that make subsequent reads slower**, and reading over too many tombstones can fail the query outright. You can degrade reads by deleting.
+
+### The three mechanisms real systems use, layered
+
+**① Lazy expiry (on read) — the correctness layer.** Check `expires_at` when the paste is fetched; if it's past, return `404` and *don't serve it*, regardless of whether the row still physically exists. **This is what makes expiry correct**, and it makes everything else a background optimization rather than a correctness requirement.
+
+**② Active sampling — the memory-reclaim layer.** Don't scan the whole table; sample. **Redis's own algorithm is exactly this**: roughly 10 times per second, sample ~20 keys that have a TTL and delete the expired ones, repeating if a high fraction were expired. Bounded work per cycle, no full scan, and it converges. The consequence worth knowing: **a Redis key with a 300s TTL is not guaranteed to be gone at 300s** — it's gone from *logical* view immediately (lazy check) but may occupy memory a little longer.
+
+**③ Time-partition and DROP — the one that actually scales.** Partition the table by expiry date (daily/weekly). Then "delete everything that expired yesterday" becomes:
+
+```sql
+DROP PARTITION p_2026_08_23;   -- metadata operation, near-instant
+```
+
+**This is the answer to give.** `DROP` a partition is O(1) metadata work — no row scan, no per-row delete, no tombstones, no vacuum, and the disk is reclaimed immediately. It turns the single most expensive recurring operation in the system into essentially free. The trade-off: it only works if the partition key aligns with the deletion predicate, i.e. you must partition **by expiry time, not by paste ID** — a decision you have to make when you create the schema, not when the delete job starts hurting.
+
+> **How to present it:** *"I'd do expiry in three layers. Correctness comes from a lazy check on read — if it's past expiry I return 404 whether or not the row still exists, so nothing depends on the cleanup job running on time. Reclamation is a background job, but I'd avoid a bulk DELETE, which at this scale holds long locks and leaves dead tuples or tombstones that slow subsequent reads. Instead I'd partition the table by expiry date and drop whole partitions — that's a metadata operation rather than a row scan, so the most expensive recurring job in the system becomes nearly free. The catch is you have to partition by expiry time from day one, so it's a schema decision, not a tuning decision."*
+
+Redis handles the cache layer's expiry for free via TTL, so this only concerns the durable store — worth saying, because it shows you know which layer the problem actually lives in.
 
 ---
 

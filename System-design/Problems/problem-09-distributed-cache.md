@@ -15,6 +15,7 @@
 7. [Consistency trade-offs](#consistency)
 8. [Scaling](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -213,6 +214,53 @@ Adding or removing nodes is the normal lifecycle of a cache cluster (growing wor
 Failure of Node B (primary) → ring re-routes shard 2 lookups to Node B'
    → Node B' promoted to primary → only shard 2's keys were ever "unavailable"
 ```
+
+---
+
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+§4 argues for consistent hashing, which is the standard interview answer and correct for Memcached-style clients. **Redis Cluster deliberately does something different**, and knowing why is a genuine differentiator.
+
+### Redis Cluster uses fixed hash slots, not consistent hashing
+
+```
+   key --> CRC16(key) mod 16384 --> a HASH SLOT (0..16383)
+                                          |
+                                          v
+                            slots are ASSIGNED to nodes
+                        node A: slots 0-5460
+                        node B: slots 5461-10922
+                        node C: slots 10923-16383
+```
+
+There are exactly **16,384 slots**, always — the number never changes as the cluster grows.
+
+**Why this solves the same problem consistent hashing solves.** The failure both are avoiding is `hash(key) % node_count`: change `node_count` and *every* key's location changes at once, invalidating the entire cache. Consistent hashing fixes it with a ring where adding a node remaps only ~1/N of keys. Redis fixes it differently: the **slot** a key maps to is *permanent* — `CRC16(key) mod 16384` never changes for a given key. Scaling means **reassigning slot ownership between nodes**, which moves data but never recomputes which slot a key belongs to.
+
+> **This is the same idea as Instagram's logical shards** ([Problem 05 §9.5](problem-05-instagram.md#realworld)): introduce a **fixed, oversized intermediate layer** between the key and the machine, then scale by remapping that layer. Recognizing that these are the *same technique* in two different systems is exactly the pattern-matching a strong candidate demonstrates.
+
+**Why 16,384 specifically** — genuinely nice trivia with a real reason. Nodes gossip their slot ownership as a **bitmap**, and 16,384 bits is **2KB** per heartbeat; 65,536 slots would be **8KB**. Since every node gossips continuously, that 4x difference is real bandwidth. 16,384 also comfortably exceeds any realistic cluster size (Redis targets up to ~1,000 master nodes), so slots-per-node stays granular enough for even rebalancing.
+
+### Gossip, not a coordinator
+
+Redis Cluster nodes exchange cluster state — slot ownership, node health, failover status — via a **gossip protocol**, each node periodically talking to a subset of peers. There is **no central configuration server**, so no coordinator to become a bottleneck or a single point of failure. The cost is that state is **eventually consistent**: immediately after a slot moves, a client may hit the old node, which replies with a **`MOVED` redirect** naming the new owner. Smart clients cache the slot-to-node map and refresh it on redirect.
+
+That redirect mechanism is worth naming: it means **clients don't need to be correct, only eventually correct** — the cluster corrects them in-band rather than requiring a coordinated cutover.
+
+### Hash tags — forcing related keys onto one node
+
+Because slots are computed per key, `user:123:profile` and `user:123:sessions` land on **different nodes**, so a multi-key operation across them fails. Redis's escape hatch: if a key contains `{...}`, only the substring inside the braces is hashed.
+
+```
+  user:{123}:profile      -+
+  user:{123}:sessions      +--> all hash on "123" -> same slot -> same node
+  user:{123}:preferences  -+
+```
+
+**The trade-off to name:** hash tags reintroduce the hot-key problem on purpose. If one tenant is far larger than the others, forcing all their keys onto one node concentrates their entire load there. Same tension as co-locating for transactions in a sharded database — you buy multi-key operations with the risk of an unbalanced cluster.
+
+> **How to use this:** *"Consistent hashing is the classic answer, and it's what Memcached clients do. Redis Cluster takes a different route — a fixed 16,384 hash slots that keys map to permanently, with scaling done by reassigning slot ownership rather than rehashing. It reaches the same goal through a simpler mechanism, and it's the same trick as logical shards in a sharded database: put a fixed oversized layer between the key and the machine, then move that layer around."*
 
 ---
 

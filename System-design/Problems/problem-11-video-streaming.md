@@ -1,6 +1,8 @@
 # Design Problem 11 — Video Streaming (YouTube / Netflix)
 
 > Worked end-to-end using the **[Master Framework](../00-DESIGN-PROBLEM-FRAMEWORK.md)**. Applies Parts 02.7, 20, 21. **Signature challenge:** chunked upload + transcoding pipeline, and adaptive-bitrate delivery via CDN.
+>
+> **One file, both products.** §1–8 are the **shared spine** — identical whether the prompt says YouTube or Netflix. **[§8.5](#divergence)** is the fork: where the two designs genuinely diverge (unbounded UGC ingest vs curated catalog, reactive vs proactive caching, Open Connect), plus the **live streaming** variant. Read §8.5 before any interview where the prompt names one of them specifically.
 
 ---
 
@@ -14,6 +16,7 @@
 6. [Database](#db)
 7. [Storage + CDN](#cdn)
 8. [Scaling](#scaling)
+8.5. [**YouTube vs Netflix — where the designs diverge**](#divergence)
 9. [Full architecture](#arch)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
@@ -171,6 +174,87 @@ Order of impact: **CDN → origin shield → elastic transcode workers → shard
 
 ---
 
+<a name="divergence"></a>
+# 8.5 YouTube vs Netflix — where the designs diverge 🎯
+
+Everything above is the **shared spine**: chunked upload, transcode fan-out, HLS/DASH segments, ABR, immutable segments cached at the edge, origin shield. If the interviewer says "design YouTube" or "design Netflix," that spine is 70% of the answer either way.
+
+The remaining 30% is where they genuinely differ — and naming that difference unprompted is what separates a memorized answer from a designed one.
+
+## The one difference everything else follows from
+
+```
+  YouTube  →  UGC ingest.  Catalog is UNBOUNDED and UNPREDICTABLE.
+              Hundreds of hours uploaded per minute, most of it never watched.
+              You cannot know in advance what will be popular.
+
+  Netflix  →  Curated catalog.  FIXED, KNOWN, and SMALL (tens of thousands of titles).
+              Every title is acquired weeks in advance.
+              You know exactly what will be popular before it launches.
+```
+
+Every divergence below is a consequence of that one line.
+
+| | **YouTube** | **Netflix** |
+|---|---|---|
+| **Catalog size** | Billions of videos, growing every second | ~tens of thousands of titles |
+| **Ingest rate** | Enormous, continuous, unpredictable | A trickle — a controlled publishing pipeline |
+| **Encoding timing** | **Must be fast** — creators expect playable in minutes | **Offline, unhurried** — weeks of lead time available |
+| **Encoding effort per title** | Cheap and uniform — you can't afford to over-invest in a video with 3 views | **Expensive and bespoke** — per-title/per-shot optimization is worth it, since the cost is amortized over millions of views |
+| **Cache strategy** | **Reactive** — pull-on-demand, cache what gets watched | **Proactive** — *push* content to caches **before** anyone asks for it |
+| **CDN** | Google's own global edge + peering, multi-CDN | **Open Connect** — Netflix's own appliances placed *inside ISP networks* |
+| **Dominant hard problem** | Ingest scale + discovery/search + view counting | Delivery efficiency + recommendations/homepage assembly |
+
+## Netflix's real differentiator: Open Connect
+
+Netflix doesn't rent a commercial CDN for the bulk of its traffic — it built one and **gave the hardware to ISPs**.
+
+```
+   [Netflix origin / control plane]
+              │
+              │  fill window: off-peak hours, pushed PROACTIVELY
+              ▼
+   ┌──────────────────────────────────────────┐
+   │   OCA — Open Connect Appliance            │
+   │   physically inside the ISP's data centre │
+   │   Netflix supplies the hardware;          │
+   │   ISP supplies power, space, connectivity │
+   └──────────────────────────────────────────┘
+              │  (traffic steered by the ISP's own BGP advertisements)
+              ▼
+        [ ISP's subscribers ]
+```
+
+- **~95% of Netflix traffic** is delivered over direct connections between Open Connect and residential ISPs, localized to the interconnection point nearest the viewer.
+- **The fill is proactive and scheduled.** Because the catalog is known and popularity is *predictable* (a new season's launch date is on the calendar), Netflix pushes content onto OCAs **during off-peak hours** — typically overnight — so that at peak viewing time the bytes are already sitting inside the ISP. **The cache is warm before the first request exists.**
+- **The ISP controls routing** via BGP advertisements, deciding which of its subscribers are served by which appliance.
+- **Why the ISP agrees:** it eliminates a huge share of their expensive transit/peering traffic. Both sides save money — that's what makes the model work commercially, and it's the part worth explaining.
+
+> **The insight to state:** "Netflix can pre-position content because it knows its catalog and can predict demand. YouTube fundamentally cannot — nobody knows which upload goes viral — so YouTube's caching has to be **reactive**, populated by actual viewing. The same CDN concept, driven in opposite directions by whether the catalog is knowable in advance."
+
+## YouTube's real differentiator: unbounded, unpredictable ingest
+
+- **Multi-CDN + dynamic placement.** Google's own edge infrastructure plus commercial partners, with cache population driven by observed demand — popular content proactively distributed to more edges, the long tail pulled on demand and cached by regional interest. It's the power-law behaviour from §7, but adaptive rather than scheduled.
+- **The long tail is the design constraint.** Most videos are watched almost never. You cannot pre-position billions of videos, so most content must be served acceptably from a cache miss — which is exactly why the **origin shield** (§7) matters far more for YouTube than for Netflix.
+- **Encoding must be cheap per video.** Since you don't know which upload deserves investment, you encode conservatively by default and can re-encode more aggressively *later*, once a video proves popular. Netflix inverts this: heavy investment up front, because every title is known to be worth it.
+- **View counting at scale is its own system.** Billions of views/day, write-heavy and approximate — that's genuinely the [Problem 19](problem-19-ad-click-aggregator.md) pipeline, not this one. Say so and move on.
+- **Discovery is the product.** Search over billions of items plus recommendations is a bigger engineering surface than delivery. Netflix's equivalent — homepage row assembly over ~tens of thousands of titles — is a much smaller, more tractable ranking problem.
+
+## Live streaming — the third variant
+
+If the interviewer pivots to **live** (YouTube Live, sports on a streaming service), the pipeline inverts:
+
+- **Transcode in real time**, on the ingest path — there is no offline window, and the encoder is now on the critical path.
+- **Latency becomes the primary metric**, not bandwidth. Standard HLS/DASH buffers several segments and costs 10–30s of delay; **low-latency HLS / LL-DASH** cut segments into partial chunks to get to ~2–5s. Sub-second needs WebRTC (Part 26), which doesn't scale the same way.
+- **No pre-positioning is possible** — the content doesn't exist yet. Every viewer is effectively a cache miss on a segment that was created seconds ago, so the edge tier must **collapse concurrent requests** for the same in-flight segment rather than fanning them all back to origin.
+- **The thundering herd is structural, not accidental:** millions of viewers request the *same* new segment within the same second. Request coalescing at the edge is mandatory, not an optimization.
+
+## How to use this in the room
+
+> *"The upload, transcode, ABR and CDN spine is the same for both. The real fork is that Netflix has a fixed, known catalog and YouTube has unbounded, unpredictable ingest. That gives Netflix two advantages it exploits hard: it can afford expensive per-title encoding because the cost amortizes over millions of views, and it can pre-position content proactively — Open Connect appliances sitting inside ISP networks, filled overnight during off-peak, so the bytes are already inside the ISP before anyone presses play. YouTube can't do either, because nobody knows which upload goes viral, so its caching is reactive and its encoding is cheap-by-default with re-encoding once a video proves popular. Which one would you like me to go deeper on?"*
+
+---
+
 <a name="arch"></a>
 # 9. Full architecture
 
@@ -217,6 +301,15 @@ Control plane (small, separate from the above):
 ### Q: "What's an origin shield and why isn't a CDN alone enough?"
 > *"A CDN's edge PoPs cache independently — for a popular video that's fine, hit ratio is near 100%. But for a long-tail video, most PoPs will miss, and if every PoP that misses hits origin storage directly, a video that suddenly gets traffic across many regions can thundering-herd the origin. An origin shield is a regional mid-tier cache that sits between edge and origin — multiple PoPs that miss route through the same shield node, so origin sees at most one request per shield per miss instead of one per PoP."*
 
+### Q: "Is designing YouTube the same as designing Netflix?"
+> *"The spine is the same — chunked upload, transcode fan-out, HLS/DASH segments, adaptive bitrate, immutable segments cached at the edge behind an origin shield. The fork is that Netflix has a fixed, known catalog and YouTube has unbounded, unpredictable ingest, and almost every other difference follows from that. Netflix can spend heavily on per-title encoding because the cost amortizes over millions of views, and it can pre-position content proactively. YouTube can't do either — nobody knows which upload goes viral — so its caching is reactive, driven by what actually gets watched, and its encoding is cheap by default with the option to re-encode once a video proves popular. YouTube's hard problems are ingest scale and discovery; Netflix's are delivery efficiency and recommendation."*
+
+### Q: "What's Open Connect and why is it different from using a CDN?"
+> *"Netflix built its own CDN and gave the hardware away to ISPs — Open Connect Appliances sit physically inside an ISP's network, with Netflix supplying the servers and the ISP supplying power, space and connectivity, and the ISP steering its own subscribers to them via BGP. Around ninety-five percent of Netflix traffic is delivered that way. The part that makes it more than 'a CDN they own' is the fill strategy: because the catalog is known and demand is predictable — a season's launch date is on the calendar — content is pushed onto those appliances overnight during off-peak hours, so the bytes are already inside the ISP before the first viewer presses play. The cache is warm before any request exists. And the ISP agrees because it removes a large share of their expensive transit traffic, so both sides save. YouTube fundamentally can't run that play, because you can't pre-position content when you don't know what will be popular."*
+
+### Q: "How would this change for live streaming?"
+> *"It largely inverts. Transcoding moves onto the ingest path in real time, so the encoder is now on the critical path with no offline window. Latency replaces bandwidth as the primary metric — standard HLS buffers several segments and costs ten to thirty seconds, so I'd use low-latency HLS or LL-DASH with partial chunks to get to a few seconds, and WebRTC only if I genuinely need sub-second, accepting that it doesn't scale the same way. And pre-positioning becomes impossible because the content doesn't exist yet: every viewer is effectively a cache miss on a segment created seconds ago. That makes the thundering herd structural rather than accidental — millions of viewers request the same new segment in the same second — so request coalescing at the edge is mandatory, not an optimization."*
+
 ---
 
 <a name="cheatsheet"></a>
@@ -230,5 +323,14 @@ Control plane (small, separate from the above):
 - **CDN:** segments are immutable → cache forever at edge; power-law access means hot content is ~100% edge-served.
 - **Origin shield:** protects storage from long-tail cache-miss thundering herds — regional dedup layer between edge and origin.
 - **Scale:** CDN → origin shield → elastic transcode workers (queue-depth autoscaling) → sharded metadata DB → thin stateless control plane.
+
+**YouTube vs Netflix (§8.5) — the fork:**
+- **One difference drives all others:** YouTube = **unbounded, unpredictable UGC ingest**; Netflix = **fixed, known, curated catalog**.
+- **Encoding:** YouTube cheap-and-fast by default, re-encode later if it proves popular (can't over-invest in a video with 3 views). Netflix expensive per-title/per-shot offline — amortized over millions of views.
+- **Caching:** YouTube **reactive** (pull on demand, driven by observed viewing, multi-CDN + dynamic placement). Netflix **proactive** — pre-position before any request exists.
+- **Open Connect:** Netflix-built appliances **inside ISP networks** (Netflix gives hardware, ISP gives power/space/connectivity, ISP steers via BGP). **~95% of traffic.** Filled **overnight off-peak** — warm cache before launch. ISP agrees because it kills their transit cost.
+- **Long tail:** YouTube's constraint (most videos rarely watched → **origin shield matters far more**). Netflix barely has one.
+- **Other hard problems:** YouTube = ingest scale, discovery/search, **view counting** (→ that's Problem 19's pipeline, not this one). Netflix = delivery efficiency, homepage/recommendation ranking.
+- **Live variant:** real-time transcode on the ingest path · **latency replaces bandwidth** as the metric (LL-HLS/LL-DASH ~2–5s, WebRTC for sub-second) · no pre-positioning possible → **request coalescing at the edge is mandatory**, herd is structural.
 
 *— Design Problem 11 complete —*

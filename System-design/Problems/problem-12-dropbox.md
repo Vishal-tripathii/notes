@@ -16,6 +16,7 @@
 8. [Storage](#storage)
 9. [Scaling](#scaling)
 10. [Full architecture](#arch)
+10.5. [**How the real system does it**](#realworld)
 11. [Interview Q&A](#interview)
 12. [Cheat Sheet](#cheatsheet)
 
@@ -231,6 +232,56 @@ Sync: each device polls/subscribes to /sync/changes?since=token
 Conflict path: write includes base version → mismatch → keep server's version,
                store incoming as "conflicted copy", both preserved.
 ```
+
+---
+
+<a name="realworld"></a>
+# 10.5 How the real system does it 🌐
+
+Dropbox has published enough detail to pin down the actual constants, and one of them is the number you should quote.
+
+### The real numbers
+
+| Parameter | Dropbox's actual choice |
+|---|---|
+| **Chunk size** | **4 MB** |
+| **Chunk identity** | **SHA-256 of the chunk contents** — the hash *is* the ID |
+| **Storage backend** | **Magic Pocket** — custom **erasure-coded** storage across JBOD spinning-disk servers in multiple data centres |
+| **Mutability** | **Once a block is written, it never changes** |
+
+**Why 4MB is defensible, and what the trade-off is** — this is the follow-up question, so have the answer:
+- **Smaller chunks** → better deduplication (more chance a chunk matches something already stored) and less re-upload after a small edit, but **more metadata rows per file** and more per-chunk round trips.
+- **Larger chunks** → less metadata overhead, fewer requests, but a one-byte edit forces re-uploading the whole chunk and dedup hit rates fall.
+- 4MB sits where metadata cost stays reasonable for multi-gigabyte files while a typical edit still only dirties one or two chunks.
+
+### Content-addressed storage — the idea underneath
+
+Using **SHA-256 of the content as the chunk's identifier** isn't just a naming convention, it's what makes the whole system work:
+
+- **Dedup is free and automatic.** Identical chunks produce identical IDs, so the same content *cannot* be stored twice — not "is deduplicated," but is structurally incapable of duplication. When a client offers a chunk ID already present, the server just adds a row linking the new file to the existing chunk. **The bytes are never uploaded at all.**
+- **Dedup works across users**, not just within one file. The tenth person to sync the same PDF uploads nothing.
+- **Integrity verification is free** — re-hash the chunk and compare against its own ID.
+- **Immutability follows necessarily.** If content determines the ID, then changing content *is* creating a different chunk. "Once written, never changes" isn't a policy Dropbox chose — it's forced by the addressing scheme, and it's what makes caching, replication, and erasure coding straightforward downstream.
+
+> **This is the same idea as Git's object store** (see [`scenario-bank/10-system-design/git-internals-content-addressing.md`](../../scenario-bank/10-system-design/git-internals-content-addressing.md)). Naming that connection is cheap and shows the pattern is understood rather than memorized.
+
+### Erasure coding vs replication — the storage-cost answer
+
+Magic Pocket is **erasure-coded**, not 3x replicated, and the difference is worth being able to explain:
+
+```
+  3x replication:   store 3 full copies       -> 300% storage, survives 2 losses
+  Erasure coding:   split into k data + m parity fragments
+                    any k of (k+m) reconstruct the original
+                    e.g. k=6, m=3  ->  150% storage, survives 3 losses
+```
+
+**The trade-off:** erasure coding costs far less storage for equal or better durability, but reconstruction requires reading **k fragments from k different machines** plus computation — so recovery is slower and read latency on a degraded object is worse. That makes it right for **cold, immutable, large** data — exactly Dropbox's chunks — and wrong for hot small objects, where replication's "just read the nearest copy" wins.
+
+> **How to use it:** *"For durable chunk storage I'd use erasure coding rather than three-way replication — roughly 1.5x storage instead of 3x for comparable durability, which at petabyte scale is the dominant cost line. The trade is that reconstructing a lost fragment means reading k fragments across machines and computing, so recovery and degraded reads are slower. That's the right trade for cold, immutable, large chunks and the wrong one for a hot metadata store, which I'd keep replicated."*
+
+### Why Dropbox moved off S3 at all
+The migration to Magic Pocket is the clearest real example of the **build-vs-buy inflection**: cloud object storage is unambiguously correct until your volume is large enough that the margin the provider charges exceeds the cost of running it yourself — including the engineers. Worth one sentence if asked about cost, and worth *not* volunteering as a default, since for almost every system the answer is still "use S3."
 
 ---
 

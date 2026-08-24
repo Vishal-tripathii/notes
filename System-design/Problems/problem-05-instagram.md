@@ -15,6 +15,7 @@
 7. [Feed generation](#feed)
 8. [Scaling](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -222,6 +223,61 @@ Feed path:    Client → LB → App Server → Redis (feed list) → CDN (photo 
 
 ---
 
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+Instagram published unusually detailed engineering writeups, and two of them are **directly useful in an interview** — including one that partly contradicts §5 above.
+
+### ① They chose sharded PostgreSQL, not NoSQL
+
+§5 argues for NoSQL end-to-end on the core path. Instagram's actual history: they **evaluated several NoSQL options and chose to shard PostgreSQL instead**, and later added Cassandra for specific workloads (the photo feed, direct messages, fraud detection).
+
+This is worth knowing because it's a **legitimate alternative answer**, not a mistake in either direction. The honest framing:
+
+> *"NoSQL is the conventional answer here and it's defensible — key lookups, no joins, horizontal scale. But Instagram actually sharded PostgreSQL, and the reason generalizes: if your access pattern is simple key lookups, a relational database sharded by user ID gives you the same scale profile plus real transactions and a mature operational story. The 'NoSQL for scale' instinct is often really 'I don't want to build sharding' — and Instagram shows that building sharding is a viable trade. They did later move specific workloads like the feed and DMs to Cassandra, which is the right shape for that: the decision is per-workload, not per-company."*
+
+Taking a position and then naming the counter-evidence is a stronger signal than picking the "expected" answer.
+
+### ② Logical shards, not physical shards — the technique worth stealing
+
+Instagram sharded into **thousands of *logical* shards**, then mapped many logical shards onto each *physical* machine.
+
+```
+   ~4,000 logical shards
+        │  (mapping table — cheap to change)
+        ▼
+   ~16 physical machines        →  later: 32  →  later: 64
+```
+
+**Why this is the important idea:** resharding data is brutal — you must physically move rows and, while doing so, keep reads and writes correct. But if IDs are assigned to *logical* shards from day one, growing capacity means **moving whole logical shards between machines and updating a mapping**, never recomputing which shard a row belongs to. The row's shard ID never changes for its entire lifetime.
+
+> **The generalizable rule:** *pick the number of logical shards once, far higher than you need, and never change it. Scale by remapping logical → physical.* This applies to any sharded system and is a strong unprompted addition to the Scaling section of almost any design.
+
+### ③ ID generation — 64 bits, no central service
+
+Instagram's IDs pack three things into a 64-bit integer:
+
+```
+┌────────────────────────┬──────────────┬────────────────┐
+│  41 bits: timestamp    │ 13 bits:     │ 10 bits:       │
+│  (ms since custom      │ logical      │ per-shard      │
+│   epoch, ~41 yrs)      │ shard ID     │ sequence       │
+└────────────────────────┴──────────────┴────────────────┘
+        → 8,192 logical shards, 1,024 IDs per ms per shard
+```
+
+Three properties fall out of this, and each solves a real problem:
+- **Time-ordered.** IDs sort chronologically, so "newest first" is just `ORDER BY id` — no secondary index on `createdAt`, and range scans on recent data hit contiguous keys.
+- **Shard-locatable.** The shard ID is *inside* the key, so any service can route a lookup to the right shard by inspecting the ID — no lookup table on the read path.
+- **No central ID service.** Instagram generated these with **PL/pgSQL functions running inside each shard**. A central generator would be both a bottleneck and a single point of failure on every write; here each shard mints its own IDs independently and collisions are impossible by construction.
+
+This is essentially **Snowflake** (Twitter's scheme, same era, same idea with different bit allocations). Naming it costs one sentence and covers a very common follow-up.
+
+### ④ Rocksandra
+Instagram later replaced Cassandra's storage engine with **RocksDB** ("Rocksandra"), after defining a pluggable storage-engine API that separated the distribution layer from the storage layer. Namedrop-only — but it illustrates a real pattern: **distribution and storage are separable concerns**, and mature systems eventually swap the bottom layer without touching the top.
+
+---
+
 <a name="interview"></a>
 # 10. Interview Q&A
 
@@ -252,5 +308,12 @@ Feed path:    Client → LB → App Server → Redis (feed list) → CDN (photo 
 - **CDN:** the dominant lever — photos are immutable, cache forever at the edge; origin barely touched.
 - **Feed:** fan-out-on-write leaned on more than Twitter (smaller follower counts); hybrid fan-out-on-read for top influencers. Full derivation in problem-04.
 - **Scale:** CDN → Redis → LB+stateless app servers → replicas → shard by owner/photo → async pipeline. Object storage scales independently.
+
+
+**Real-world grounding (§9.5):**
+- Instagram **sharded PostgreSQL** rather than going NoSQL (added Cassandra later for feed/DMs/fraud) — a legitimate counter-answer: *the decision is per-workload, not per-company.*
+- **Logical shards, not physical.** ~thousands of logical shards mapped onto few machines; scale by **remapping logical→physical**, never by recomputing a row's shard. *Pick the logical count once, far too high, and never change it.*
+- **64-bit ID = 41 bits time + 13 bits shard + 10 bits sequence** (Snowflake-shaped), minted **inside each shard** — time-ordered, shard-locatable from the key itself, no central ID service to bottleneck or fail.
+- Rocksandra = Cassandra with a RocksDB storage engine — distribution and storage are separable concerns.
 
 *— Design Problem 05 complete —*

@@ -18,6 +18,7 @@
 8. [Load Balancer](#lb)
 9. [Scaling](#scaling)
 10. [Full architecture](#arch)
+10.5. [**How the real system does it**](#realworld)
 11. [Interview Q&A](#interview)
 12. [Cheat Sheet](#cheatsheet)
 
@@ -282,6 +283,49 @@ Redis Cluster (shard counters by key) → replicas (config reads) → more app s
 
 Config source of truth: [Postgres/KV: tier limits table] → loaded into Redis on change (Part 8)
 ```
+
+---
+
+<a name="realworld"></a>
+# 10.5 How the real system does it 🌐
+
+§4 works through the algorithms. Here's what production systems actually run, and the one implementation detail that matters more than the algorithm choice.
+
+### What the big players use
+
+| System | Algorithm | Why |
+|---|---|---|
+| **Stripe, Amazon** | **Token bucket** in Redis | O(1) per check, **smallest per-user footprint of any algorithm**, and it *allows bursts* — which matches real API usage, where clients legitimately fire a batch then go quiet |
+| **Cloudflare** | **Sliding window counter** | Approximate but smooth; reported **~99.997% accuracy on real traffic at O(1) memory** — the accuracy loss is genuinely negligible at their scale |
+| Rarely used in production | Sliding window **log** | Exact, but **O(N) memory per user** — you store a timestamp per request. Correct, and too expensive to run. |
+
+**Token bucket's actual footprint** is worth knowing concretely: a Redis **hash with two fields** — `tokens` (remaining) and `last_ts` (last refill). Refill is computed **lazily on read** from elapsed time rather than by a background timer, so there is no sweeper process and no per-user cron. Two small fields per user is why it wins on memory.
+
+**Cloudflare's sliding window counter** is similarly cheap: **two keys per user per tier** — current window and previous window — with the answer being a weighted blend of the two based on how far into the current window you are. It smooths the fixed-window boundary burst without storing individual timestamps.
+
+### The detail that matters more than the algorithm: atomicity
+
+Every one of these algorithms is a **read-modify-write**, and under concurrency that's a race:
+
+```
+  BAD:  GET count  ->  check limit  ->  INCR
+        Two requests read the same count, both pass the check, both increment.
+        Over-admission under exactly the load you built this to control.
+```
+
+**The fix is a Lua script**, executed server-side in Redis. Redis runs a Lua script **atomically** — no other command interleaves — so read-check-write becomes one indivisible operation, without a distributed lock and without a round trip per step.
+
+> **Say this unprompted:** *"Whichever algorithm I pick, the check has to be atomic — it's a read-modify-write, so with separate GET and INCR two concurrent requests both pass the check and both increment, and I over-admit under exactly the load I built this for. I'd put the whole check-and-decrement in a Lua script, which Redis executes atomically, rather than reaching for a distributed lock."*
+
+That single point shows you've thought about the implementation and not just the algorithm taxonomy — and it's the same insight as the atomic conditional write in [Problem 18](problem-18-ecommerce-amazon.md) and the idempotency-key unique constraint in [Problem 16](problem-16-payment-system-upi.md): **push the condition into the atomic operation instead of checking around it.**
+
+### Distributed state: shared vs local-with-reconciliation
+
+Two viable positions, and it's worth naming both:
+- **Shared state in Redis** — accurate, but every request pays a network round trip, and Redis becomes a hard dependency on the request path.
+- **Local counters with periodic reconciliation** — each node limits against its own approximate view and syncs periodically. Far faster and survives a Redis outage, but allows overshoot proportional to node count during the sync interval.
+
+The honest framing: *"at the edge, with hundreds of PoPs and a millisecond budget, I'd take local approximation with reconciliation and accept the overshoot. For a billing-critical or abuse-critical limit I'd pay for shared state."* Matching the choice to the consequence of being wrong is the answer, not picking one universally.
 
 ---
 

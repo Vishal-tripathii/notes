@@ -15,6 +15,7 @@
 7. [Scaling](#scaling)
 8. [Bottlenecks & trade-offs](#bottlenecks)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -257,6 +258,31 @@ Media: [Object Store] → [CDN]           ← never on the app tier
 
 ---
 
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+The design above is the standard answer. Here's where it lines up with Twitter's published architecture — useful because **naming a real number or a real constraint is what makes an answer sound like engineering rather than recitation.**
+
+| Design decision above | What Twitter actually did |
+|---|---|
+| Per-user precomputed timeline in Redis | Confirmed — home timelines live in a **Redis cluster**, using **native Redis list structures** |
+| Capped list length (~800) | **Exactly 800 entries** is the real cap. Beyond that, you're paging into history, which goes to the DB path. |
+| Celebrity threshold | Roughly **~10,000 followers** as the commonly cited dividing line between push and pull |
+| Fan-out worker pool off a queue | A **fanout daemon** queries the **social graph service** for the follower list, then inserts the tweet ID into follower lists across the Redis cluster |
+| "A few seconds of lag is fine" | Target was **tweet delivered in under 5 seconds** end to end |
+
+**Three details worth stealing for your answer:**
+
+1. **Why Redis and not Memcached.** Twitter's stated reason is that Redis deals in **structured data** — the home timeline is a *list*, and Redis has a native list type with O(1) push and trim. Memcached stores opaque blobs, so every timeline update would mean read-blob → deserialize → append → re-serialize → write-blob. **Parsing is expensive at this volume**, and the data structure is the whole point. This is a much better answer to "why Redis?" than "it's faster."
+
+2. **The celebrity number, made visceral.** 30M timeline insertions for one tweet, at even 1ms each, is **~8 hours of sequential work**. That single sentence does more to justify the hybrid than any amount of Big-O notation — it reframes the celebrity problem from "expensive" to "physically impossible to do inline."
+
+3. **Scale reference points.** Published figures from Twitter's scaling era: **150M active users, ~300K QPS on timeline reads, a 22 MB/s firehose.** Reads at 300K/s against ~5K/s writes is that 40:1 ratio confirmed at real scale — your estimation in §2 lands in the right order of magnitude, which is what matters.
+
+> **How to use this in the room:** don't recite it as trivia. Deploy one detail at the moment it justifies a decision — "I'd cap the cached timeline, Twitter uses 800 entries" when you introduce the cap, or "one celebrity tweet is 30 million inserts, which at a millisecond each is eight hours of work" when you explain why push can't be universal. A single concrete number placed well is worth more than a list of facts.
+
+---
+
 <a name="interview"></a>
 # 10. Interview Q&A
 
@@ -278,6 +304,9 @@ Media: [Object Store] → [CDN]           ← never on the app tier
 ### Q: "How do you shard this?"
 > *"Both tweets and the follow graph are sharded by userId, so a user's own tweets, their follow list, and their followers stay on one shard for the queries that actually get run — 'this user's tweets' and 'who does/does not follow this user.' The follow graph itself is stored as a simple adjacency list, not a relational graph DB, because I only ever need those two lookups, never multi-hop traversal."*
 
+### Q: "Why Redis for the timeline cache and not Memcached?"
+> *"Because the timeline is a list, and Redis has a native list type with O(1) push and trim. With Memcached I'd be storing an opaque blob, so every single fan-out insertion would mean reading the blob, deserializing it, appending, re-serializing, and writing it back — and at hundreds of thousands of fan-out writes a second, that parsing cost dominates. The data structure is the actual reason, not raw speed. It also gives me the capped list for free: push and trim to 800 entries in one operation, so memory per user is bounded regardless of how prolific the people they follow are."*
+
 ---
 
 <a name="cheatsheet"></a>
@@ -290,5 +319,11 @@ Media: [Object Store] → [CDN]           ← never on the app tier
 - **Cache:** per-user precomputed timeline list in Redis, capped length, O(1) read; fan-out done by async workers off a queue so posting stays fast regardless of follower count.
 - **Scale:** shard by userId (tweets + graph) → horizontal fan-out workers → read replicas → Redis cluster + replication → CDN for media.
 - **Trade-offs:** celebrity reads still do a small bounded merge; timeline lag is an intentional AP choice under CAP; cap list length to bound cache memory; new-account cold start falls back to on-read pull.
+
+**Real-world grounding (§9.5) — drop one of these at the moment it justifies a decision:**
+- Twitter's home timeline cap is **exactly 800 entries**, in **native Redis lists**; celebrity threshold ≈ **10K followers**; target delivery **< 5 seconds**.
+- **Redis over Memcached because the timeline is a *list***, not a blob — Memcached would force read→deserialize→append→reserialize→write on every fan-out insert. *The data structure is the reason, not speed.*
+- **30M inserts × 1ms ≈ 8 hours of sequential work** for one celebrity tweet — reframes the celebrity problem from "expensive" to "impossible inline."
+- Reference scale: **~150M active users, ~300K QPS, 22 MB/s firehose.**
 
 *— Design Problem 04 complete —*

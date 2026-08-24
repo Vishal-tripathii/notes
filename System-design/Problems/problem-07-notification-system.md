@@ -16,6 +16,7 @@
 6. [Database](#db)
 7. [Scaling](#scaling)
 8. [Full architecture](#arch)
+8.5. [**How the real system does it**](#realworld)
 9. [Interview Q&A](#interview)
 10. [Cheat Sheet](#cheatsheet)
 
@@ -186,6 +187,49 @@ deliveryId(PK) | eventId | userId | channel | status(sent/failed/retried) | atte
             │
    Failures after N retries → [Dead-letter Queue] → alerting
 ```
+
+---
+
+<a name="realworld"></a>
+# 8.5 How the real system does it 🌐
+
+The pipeline in §4 is right. What production systems add is almost entirely about the **last mile** — the part you don't control, because APNs and FCM are third parties with their own rules.
+
+### Batch at the provider API, not one call per device
+
+The single biggest efficiency lever, and easy to miss:
+
+| Provider | Batching capability |
+|---|---|
+| **APNs** (Apple) | Up to **~1,000 device tokens per HTTP/2 request** |
+| **FCM** (Google) | **Multicast API** — one call, many tokens |
+
+The consequence for the design: fan-out workers should **accumulate tokens into batches** before calling out, not issue one HTTP call per user. A campaign to 10M users is ~10,000 provider calls, not 10M. Typical shape: query the target audience in batches of **10K–50K users**, publish batch messages onto a per-channel topic, and have workers resolve tokens and call the provider in bulk.
+
+Note also that **APNs uses HTTP/2 with long-lived connections** — so the worker pool should hold persistent connections and multiplex, not open a connection per send. Connection setup at this volume is pure waste.
+
+### Token lifecycle — the operational detail that separates real answers
+
+Device tokens are **not stable identifiers**. They rotate on reinstall, on OS update, on app restore to a new device. An architecture that treats them as permanent slowly fills with garbage:
+
+- **Registry keyed by `(userId, deviceId)`** — *not* by token, because the token is the thing that changes. One user has many devices; each device's token gets **upserted on app launch**.
+- **Delete on `NotRegistered` / `Unregistered`.** When APNs or FCM tells you a token is dead, that is authoritative — remove it immediately. Continuing to send to it wastes quota and can count against your sending reputation.
+- **Expire tokens unused for 30–60 days.** Otherwise the registry grows without bound with tokens for apps that were uninstalled and never reported.
+
+> **Say this:** *"I'd key the device registry on user and device ID rather than on the token, because tokens rotate on reinstall and OS updates — keying on the token means accumulating dead rows you can never confidently clean up. Then I'd treat a NotRegistered response from APNs or FCM as authoritative and delete immediately, and age out tokens unused for a couple of months."*
+
+### Failure isolation across channels
+
+Push, email, and SMS have **completely different** failure modes, latencies, and rate limits — SMS providers are slow and expensive, APNs is fast, email sits in between. The patterns that matter:
+
+- **Separate queues and separate worker pools per channel.** A backed-up SMS provider must not stall push delivery. This is the **bulkhead** pattern (Part 22).
+- **Circuit breaker per provider.** If FCM starts erroring, stop hammering it — fail fast, queue, and retry when the breaker half-opens. Retrying into a struggling provider makes its recovery slower.
+- **Exponential backoff on retry**, and honour any `Retry-After` the provider returns.
+
+> The framing: *"Each channel gets its own queue and worker pool, so one slow provider degrades only its own channel — bulkheading. And each provider gets a circuit breaker, because retrying hard into a provider that's already failing is how you turn their brief incident into your extended one."*
+
+### The dedup point, sharpened
+§5's idempotency requirement is the same discipline as the idempotency key in [Problem 16](problem-16-payment-system-upi.md) and the `dedupeId` in [Problem 19](problem-19-ad-click-aggregator.md): **at-least-once delivery from the queue plus an idempotent effect at the edge.** Notifications are one of the few systems where the failure is directly visible to the user — a duplicate push is immediately noticed and immediately annoying — so it's worth naming that the queue *will* redeliver and the dedup key is what makes that safe.
 
 ---
 

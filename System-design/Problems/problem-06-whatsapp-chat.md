@@ -15,6 +15,7 @@
 7. [Database](#db)
 8. [Scaling](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -288,6 +289,41 @@ For a group of size N, one send fans out to N recipients — the sender's connec
 
 ---
 
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+WhatsApp is the best-documented case study in this whole folder, and the headline fact **directly challenges the estimate in §2 and §8**.
+
+### The number that should change your answer
+
+§8 assumes **~50K–100K sockets per box**. WhatsApp ran **~2 million concurrent connections per server.**
+
+That's a **20–40× gap**, and it isn't hardware — it's the **concurrency model**:
+
+| | Thread-per-connection (typical JVM/OS-thread model) | WhatsApp (Erlang/BEAM) |
+|---|---|---|
+| Unit per connection | An OS thread — ~1MB of stack, scheduled by the kernel | An **Erlang process** — ~**300 bytes**, scheduled by the BEAM VM |
+| 2M connections means | 2M OS threads — impossible; the kernel scheduler dies long before the memory does | 2M lightweight processes — routine for BEAM |
+| Failure blast radius | A crash can take the process/thread pool with it | Processes are **isolated**; one dying connection kills only its own process |
+
+The design consequence: **the cost of an idle connection is what determines your fanout**, and a chat system is overwhelmingly idle connections. If holding a socket costs a megabyte, you're buying servers to hold silence. Erlang was built for telecom switches — massive numbers of mostly-idle, independently-failing connections — which is *exactly* the shape of a messaging app.
+
+> **How to use it:** *"I'd size connection servers by what it costs to hold an idle socket, since a chat system is mostly idle connections. On a thread-per-connection model that's roughly a megabyte of stack each, so you're at tens of thousands per box. WhatsApp got to about two million per server on Erlang, where a connection is a ~300-byte VM process rather than an OS thread. I'd design for the pattern regardless — event-loop or green-thread concurrency, never thread-per-connection — but it's worth knowing the ceiling moves by more than an order of magnitude based on that one choice."*
+
+That reframes the whole connection-tier sizing conversation, and it's the single most valuable thing to carry out of this problem.
+
+### Other reference points worth having
+
+- **~50 engineers** serving **900M users** at the point of the Facebook acquisition — the standing counter-example to "scale requires headcount." What bought it: a runtime whose concurrency and fault-isolation model matched the problem, and a deliberately narrow feature set.
+- **~40 billion messages/day**; published figures from the ~500M-user era cite **~11,000 cores** and peaks around **70M messages/sec** across the fleet.
+- **Every active connection is its own process**, holding that user's session state. Message delivery is then literally "send a message to that process" — Erlang's built-in primitive. The routing layer in §4 is doing by hand what BEAM provides natively, which is why the architecture looks so simple relative to its scale.
+
+### The honest caveat
+
+Don't over-index on "use Erlang." The interviewer is testing whether you understand **why** it fit — mostly-idle connections, cheap isolation, per-connection failure containment — not whether you'd pick that language. Go's goroutines, Rust's async tasks, or a Node/epoll event loop get you into the same regime. **The anti-pattern to name is thread-per-connection**, and that's the transferable lesson.
+
+---
+
 <a name="interview"></a>
 # 10. Interview Q&A
 
@@ -326,5 +362,12 @@ For a group of size N, one send fans out to N recipients — the sender's connec
 - **Scale:** sticky/connection-aware LB → shard connection servers by socket capacity → partition presence store and Pub/Sub bus (don't broadcast to every server) → replicate + partition Cassandra by conversationId.
 - **Delivery status:** sent/delivered/read = state transitions on the stored message, driven by ACK frames over the same socket.
 - **Dedup:** client-generated `clientMsgId` → exactly-once from the sender's perspective even under mobile retries.
+
+
+**Real-world grounding (§9.5) — this one changes the sizing:**
+- WhatsApp held **~2M concurrent connections per server**, vs the ~50–100K/box assumed in §2/§8 — a **20–40× gap** that comes from the concurrency model, not hardware.
+- **An Erlang process is ~300 bytes vs ~1MB for an OS thread.** A chat system is mostly *idle* connections, so **the cost of holding an idle socket sets your fanout.** Name **thread-per-connection as the anti-pattern**; event-loop / green-threads (Go, Rust async, epoll) get you to the same regime.
+- Reference points: **~50 engineers / 900M users** at acquisition; **~40B messages/day**; ~11,000 cores and ~70M msg/s peaks in the ~500M-user era.
+- Every connection is its own process holding session state → delivery is literally "send to that process." *Don't say "use Erlang" — say why it fit: cheap isolation, per-connection failure containment.*
 
 *— Design Problem 06 complete —*

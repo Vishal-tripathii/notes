@@ -19,6 +19,7 @@
 9. [Scaling + Machine-ID prefix as shard key](#scaling)
 10. [301 vs 302 redirect strategy](#redirect)
 11. [Full architecture](#arch)
+11.5. [**How the real system does it**](#realworld)
 12. [Interview Q&A](#interview)
 13. [Cheat Sheet](#cheatsheet)
 
@@ -211,6 +212,48 @@ Click events → **queue** → workers update counts → redirect stays fast (ne
 
 Code gen: [Machine-ID prefix + local counter]  (unique + shard key)
 ```
+
+---
+
+<a name="realworld"></a>
+# 11.5 How the real system does it 🌐
+
+The counter-vs-hash debate in §4 is the right frame. Here's what production systems actually settle on, and the two consequences that are easy to miss.
+
+### The consensus answer: Snowflake ID → Base62
+
+Rather than a global counter (single point of failure, coordination on every write) or a truncated hash (collisions you must detect and retry), the common production choice is a **Snowflake-style distributed ID** encoded to Base62:
+
+```
+  64-bit Snowflake ID:  [ timestamp | machine ID | sequence ]
+                                    | Base62 encode
+                                    v
+                          7 chars ~= 3.5 trillion codes
+```
+
+Why this beats both alternatives:
+- **vs a central counter:** no coordination, no SPOF. Each generator mints IDs independently and collisions are impossible *by construction* — the machine ID is baked into the value.
+- **vs hashing the URL:** zero collisions, so no read-before-write to check for one, and no retry loop. It also avoids the subtle bug where the *same* long URL shortens to the same code for two different users who each wanted their own analytics.
+
+**Base62, not Base64** — and this is a real reason, not a stylistic one. Base64's alphabet includes `+` and `/`, which are **reserved characters in a URL** and must be percent-encoded; and its `-`/`_` URL-safe variant still risks confusion when a code is copied out of running text or double-clicked. Base62 (`0-9A-Za-z`) is the largest alphabet that is unambiguously URL-safe with no encoding. **7 characters ≈ 3.5 trillion** codes, comfortably beyond any realistic corpus.
+
+### The sequential-ID leak — a real security consideration
+
+A pure incrementing counter produces **guessable** codes. Two concrete consequences:
+
+1. **Business-intelligence leak.** Anyone can shorten two URLs an hour apart, decode both codes, and subtract — you've just published your creation rate to a competitor.
+2. **Enumeration.** Walk the keyspace and you can harvest every link ever created, including ones users assumed were unlisted. Shortened URLs routinely contain private documents, invitations, and internal dashboards — people treat "unguessable" as "private."
+
+Snowflake IDs already scatter the low bits somewhat, but if unguessability matters, say so explicitly: **add random bits, or encrypt the ID before encoding it** (a format-preserving or simple block cipher over the integer keeps it fixed-length and reversible while destroying the ordering). Naming this trade-off unprompted is a strong signal — it's the security dimension of a design that otherwise looks purely about throughput.
+
+### If you *do* use hashing
+
+Hash-based generation is still defensible when you want the same URL to map to the same code. The collision handling to name:
+- **Truncating** MD5/SHA-256 to 7 Base62 chars sharply raises collision probability — you cannot skip handling it.
+- On collision: **re-hash with a different seed**, take **additional bits** from the original hash, or append an incrementing suffix — then re-check.
+- Each of those needs a **read-before-write** against the store, which is exactly the cost the Snowflake approach avoids. That's the real argument, and it's about write-path latency, not elegance.
+
+> **How to present it:** *"I'd generate a Snowflake-style ID and Base62-encode it. That gives zero collisions by construction with no coordination and no read-before-write, unlike truncated hashing where I'd have to detect the collision and retry. Base62 rather than Base64 because plus and slash are reserved in URLs. The one thing I'd flag is that time-ordered IDs are guessable — someone can decode two codes and infer my creation rate, or enumerate the keyspace and harvest links people assumed were private — so if that matters I'd encrypt the ID before encoding it."*
 
 ---
 

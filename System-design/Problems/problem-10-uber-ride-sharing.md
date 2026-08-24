@@ -5,6 +5,8 @@
 > **Signature challenge:** geospatial matching (finding nearby drivers fast) + real-time location updates at scale.
 >
 > **Note:** `../../LLD/Problems/problem-09-cab-booking-uber.md` covers the **CLASS design** (Trip state machine, driver-match locking) for one service instance — this file is the **SYSTEM**: how millions of location updates/sec and matching queries are handled across a fleet.
+>
+> **Pairs with [`problem-17-food-delivery-swiggy-zomato.md`](problem-17-food-delivery-swiggy-zomato.md).** Food delivery reuses this file's geospatial index unchanged, but is *not* "Uber for food": it's 1:N **batching** with **deliberately delayed** assignment, not 1:1 immediate matching. Read them together — the contrast is a common interview probe.
 
 ---
 
@@ -19,6 +21,7 @@
 7. [Matching + dispatch](#matching)
 8. [Scaling — shard by geography](#scaling)
 9. [Full architecture](#arch)
+9.5. [**How the real system does it**](#realworld)
 10. [Interview Q&A](#interview)
 11. [Cheat Sheet](#cheatsheet)
 
@@ -219,6 +222,34 @@ World map ──▶ split into regions (by city / metro area, or by a coarse S2/
 ```
 **Read path (matching):** rider request → dispatch → regional geo-index (cell + neighbors) → rank by ETA/rating → atomic claim → push offer over the driver's live socket.
 **Write path (location):** driver ping → connection server → in-memory regional index (blind overwrite) → async fan-out to analytics queue.
+
+---
+
+<a name="realworld"></a>
+# 9.5 How the real system does it 🌐
+
+§4 namedrops H3 as "the real-world evolution." It's worth being able to say **why hexagons**, because it's a natural follow-up and the answer is concrete rather than aesthetic.
+
+### Why Uber built H3, and why hexagons specifically
+
+H3 is a **hexagonal hierarchical** spatial index — hexagons at multiple resolutions, each cell subdividing into finer cells. Three properties, and each fixes a specific defect of square/geohash grids:
+
+**① Uniform neighbour distance.** A hexagon has **exactly 6 neighbours, and all 6 centroids are the same distance away.** A square has 8 neighbours at **two different distances** — 4 edge-adjacent and 4 diagonal, which are ~1.41× further. That inconsistency matters for exactly the operation this system runs constantly: "expand outward from my cell to find nearby drivers." With squares, one ring of expansion is not one uniform distance; with hexagons it is. **This directly cleans up §4's "query your cell plus its 8 neighbours" — with hexagons it's 6, and they're genuinely equidistant.**
+
+**② Better circular approximation.** Real spatial questions are circular — "drivers within 2km," "delivery radius," "surge zone." A hexagon approximates a circle noticeably better than a square, so a hex-based radius query wastes less area on corners that are inside the cell but outside the actual radius.
+
+**③ Uniform cell area → comparable aggregates.** Every cell at a given resolution covers essentially the same area, so grouping by cell ID gives directly comparable numbers. Geohash cells **distort badly with latitude** — a 5-character cell near the equator and one near the poles are very different real areas — which quietly corrupts any density or pricing computation that groups by cell. For Uber this is not academic: **surge pricing and dispatch decisions are computed per cell**, so cells that aren't comparable produce prices that aren't comparable.
+
+> **How to answer "why hexagons?":** *"Three reasons, and the neighbour one matters most here. A hexagon has six neighbours all at the same centroid distance, whereas a square has eight at two different distances — so 'expand one ring outward' is a uniform operation, which is exactly what nearby-driver search does constantly. Hexagons also approximate a circle better, which matters because real queries are radii; and cells have consistent area regardless of latitude, unlike geohash cells which distort toward the poles — that matters because surge pricing and supply-demand are computed per cell, and cells you can't compare give you numbers you can't compare."*
+
+### The honest caveat about hexagons
+
+Worth saying, because it shows you actually understand the geometry: **hexagons don't tile hierarchically without error.** A hexagon cannot be perfectly subdivided into smaller hexagons the way a square subdivides into four squares — so H3's finer resolutions only *approximately* nest inside the coarser ones. H3 also needs **12 pentagons** to cover a sphere at all (you cannot tile a sphere with hexagons alone). These are real inaccuracies Uber accepted because the neighbour-uniformity and area-consistency benefits outweighed them.
+
+That trade is the interesting part: **geohash gives exact hierarchical nesting with distorted, non-uniform cells; H3 gives uniform, well-behaved cells with approximate nesting.** Uber chose the second because its dominant operations are proximity and aggregation, not exact hierarchical containment.
+
+### What to actually use in an interview
+Design with **geohash or a quad-tree** — they're simpler to explain and derive live, and no interviewer expects you to implement H3 on a whiteboard. Mention H3 as **the direction production systems evolved and why**, which demonstrates you know the limits of the thing you just designed. That's the right depth: design the simple thing, name the sophisticated thing, explain the gap.
 
 ---
 

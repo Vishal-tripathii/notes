@@ -1,6 +1,8 @@
 # Design Problem 14 — Ticket Booking (BookMyShow HLD)
 
 > Worked end-to-end using the **[Master Framework](../00-DESIGN-PROBLEM-FRAMEWORK.md)**. Applies Parts 04, 21. **Signature challenge:** inventory consistency under concurrent booking **AT SYSTEM SCALE** — no seat/ticket double-sold, across a fleet of app servers and a sharded/replicated database. Note: **[`../../LLD/Problems/problem-08-bookmyshow.md`](../../LLD/Problems/problem-08-bookmyshow.md)** covers the CLASS design (seat-lock manager, TTL holds) for **one service instance** — this file is how that same guarantee holds when there are **many app server instances and a distributed database** behind them.
+>
+> **Pairs with [`problem-18-ecommerce-amazon.md`](problem-18-ecommerce-amazon.md).** Both forbid double-selling, but the inventory shape differs: here it's **identified** (seat `A12` specifically → a row per seat, lock the row), there it's **fungible** (any 1 of 500 units → one counter, atomic conditional decrement). Fungible gives a cheaper primitive but concentrates *all* contention on one row — which is why flash sales are that problem's hard case and not this one's.
 
 ---
 
@@ -14,6 +16,7 @@
 6. [Database](#db)
 7. [Scaling — the virtual waiting room](#scaling)
 8. [Full architecture](#arch)
+8.5. [**How the real system does it**](#realworld)
 9. [Interview Q&A](#interview)
 10. [Cheat Sheet](#cheatsheet)
 
@@ -208,6 +211,55 @@ Straight-line scaling (LB → stateless app servers → replicas → shard, per 
 
 Confirm success → [Queue → payment settlement / notification workers]  (async, Part 13)
 ```
+
+---
+
+<a name="realworld"></a>
+# 8.5 How the real system does it 🌐
+
+§4 gets the mechanism right. Here's the standard production shape, stated precisely — plus the failure mode that a purely lock-based answer misses.
+
+### The standard shape: Redis holds the lock, the database holds the truth
+
+```
+  1. User selects seat A12
+  2. SET seat:show99:A12  <userId>  NX  EX 300      <- atomic claim, 5-min TTL
+        NX = only if it does not already exist  (this IS the mutual exclusion)
+        EX = auto-release, no cleanup job required
+  3. User pays  ->  DB write marks the seat BOOKED  ->  release the Redis key
+  4. User abandons  ->  TTL expires  ->  seat silently returns to the pool
+```
+
+Two properties do the real work:
+
+- **`SET ... NX` is a single atomic operation.** Mutual exclusion comes from the atomicity of one command, not from a check followed by a write. Same principle as the atomic conditional `UPDATE` in [Problem 18](problem-18-ecommerce-amazon.md#core) and the Lua-scripted rate-limit check in [Problem 02](problem-02-rate-limiter.md#realworld): **push the condition into the atomic operation.**
+- **TTL means abandonment needs no cleanup path.** The overwhelmingly common failure — user selects seats and closes the tab — resolves itself. There are no dangling locks to sweep, which removes an entire class of operational bug.
+
+### The critical caveat: Redis is the gate, the database is the authority
+
+This is the part that separates a strong answer from a lock-shaped one. **A distributed lock is a performance optimization, not a correctness guarantee.**
+
+Redis can lose the lock:
+- The TTL expires **while the user is still paying** (slow payment gateway) — someone else legitimately acquires the seat, and now two people believe they hold it.
+- A **failover** promotes a replica that hadn't yet received the lock write.
+
+So the **final booking write must independently enforce uniqueness**, via a database constraint or optimistic concurrency control:
+
+```sql
+-- OCC: only succeeds if the seat is still genuinely available
+UPDATE seats SET status='BOOKED', user_id=:u, version=version+1
+ WHERE show_id=:s AND seat_no='A12' AND status='AVAILABLE' AND version=:v;
+-- rows affected = 0  ->  someone beat you; refund/void and tell the user honestly
+```
+
+> **Say this unprompted — it is the highest-value sentence in this problem:** *"I'd use Redis with SET NX and a TTL as the seat hold, but I'd treat that strictly as a fast gate to reduce contention and give good UX, not as the correctness guarantee. The lock can be lost — the TTL can expire mid-payment, or a failover can promote a replica that never saw it — so the final booking write still enforces uniqueness in the database with a conditional update or a unique constraint. The lock stops 99% of contention from ever reaching the database; the database is what makes double-booking impossible."*
+
+### Practical details worth having
+
+- **Hold duration is a real product trade-off.** Too short and users lose seats mid-payment; too long and inventory sits frozen during a high-demand on-sale. ~5–10 minutes is typical, and it's usually **shortened deliberately for high-demand events** — exactly the same reasoning as the shortened reservation window during a flash sale in [Problem 18](problem-18-ecommerce-amazon.md#flashsale).
+- **Lock the whole selection atomically.** A user picking 4 adjacent seats must acquire all 4 or none — otherwise you get partial holds that block other users while satisfying nobody. Use a Lua script (atomic across keys) or acquire in a **deterministic order** (e.g. sorted seat number) to avoid deadlock between two users selecting overlapping sets.
+- **Store the holder's ID as the lock value** and verify it before releasing. Otherwise a late request from a user whose TTL already expired can delete a lock now legitimately held by someone else — the classic distributed-lock bug.
+- **Idempotency on the booking request** (Problem 16's discipline): a user double-tapping "Pay" must not create two bookings.
 
 ---
 

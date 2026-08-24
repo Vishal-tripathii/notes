@@ -14,6 +14,7 @@
 6. [Caching](#cache)
 7. [Scaling](#scaling)
 8. [Full architecture](#arch)
+8.5. [**How the real system does it**](#realworld)
 9. [Interview Q&A](#interview)
 10. [Cheat Sheet](#cheatsheet)
 
@@ -175,6 +176,45 @@ WRITE / UPDATE PATH (offline, decoupled, low-throughput):
      → publish immutable snapshot (versioned)
      → [Suggestion Servers] pull new snapshot, atomic swap, old one discarded
 ```
+
+---
+
+<a name="realworld"></a>
+# 8.5 How the real system does it 🌐
+
+§4 builds the trie. The production insight that makes autocomplete actually work is a single principle, and it's worth stating as a principle rather than a technique.
+
+### The principle: latency forbids ranking at read time; relevance forbids skipping it
+
+```
+   Budget:  suggestions must appear within ~100ms of a KEYSTROKE
+            (not per query — per keystroke, so several per second per user)
+
+   That budget rules out:  any disk access
+                           any ranking computation at request time
+                           any cross-service call
+```
+
+Both constraints are real and they appear to conflict. **The resolution is to move ranking offline**: rank ahead of time, store the answer, and make the read a lookup rather than a computation.
+
+Concretely: **each trie node stores its own precomputed top-K completions.** A keystroke walks to the prefix node and returns the cached list — **a pointer walk, not a ranked query**. There is no traversal of the subtree at read time, no scoring, no sort.
+
+> **Say this, because it's the whole design in one line:** *"You can't rank at read time within a per-keystroke budget, and you can't skip ranking without returning junk. So ranking happens offline and the top-K is materialized at every node — I trade storage for latency, and the read collapses to a pointer walk."*
+
+That's the same **precompute-the-read** move as fan-out-on-write in [Problem 04](problem-04-twitter-news-feed.md): when reads vastly outnumber writes and the read has a hard latency budget, push the work to the write path.
+
+### The whole index lives in RAM
+
+The other enabling fact: **the serving index fits in memory**. That's what makes sub-millisecond lookup possible — not clever algorithms, just no disk in the path. Two consequences worth naming:
+
+- **The trie is a read-only serving artifact**, rebuilt offline and swapped in atomically — not mutated in place under live traffic. That sidesteps every concurrency problem a mutable shared trie would create, and it means an update is a deploy, not a write path.
+- **Freshness is therefore batch, not real-time**, and that's an accepted trade. New queries entering the suggestion set within minutes or hours is fine for almost every use case; the exception is trending/breaking-news terms, which usually get a **separate, small, fast-updating overlay** merged on top of the main index rather than forcing the whole trie to be real-time.
+
+### Sharding when the trie outgrows one machine
+
+**Shard by prefix** — e.g. all prefixes starting `a–f` on node 1, `g–m` on node 2. A query has a known prefix, so routing is a direct lookup with no scatter-gather.
+
+**The catch to raise unprompted:** prefix distribution is **wildly uneven** — far more queries begin with `s` or `c` than with `z` or `q`. Naive alphabetical ranges create badly hot shards. The fix is to **split busy ranges more finely**: `s` might be several shards (`sa–sh`, `si–sz`) while `q`, `x`, `y`, `z` share one. That's the same non-uniform partitioning idea as the quad-tree in [Problem 10](problem-10-uber-ride-sharing.md) — partition by *density*, not by an even split of the key space.
 
 ---
 
