@@ -395,6 +395,6 @@ Every real payment system runs a **reconciliation job** — usually nightly, som
 - **Reconciliation:** ledger vs settlement file, nightly. Auto-heal known patterns, alert the rest. Continuously assert the zero-sum invariant.
 - **DB:** SQL for ledger + idempotency (need multi-row ACID), sharded by `account_id`, **time-partitioned**, **synchronous** replication (async replication = losing money on failover).
 - **UPI specifics:** hub-and-spoke via NPCI (N connections, not N²); VPA is the indirection layer hiding account numbers; TPAP ≠ switch — **clarify which you're designing**.
-- **Cross-refs:** Part 4 (CAP — this is the CP example), Part 13/14 (queues for the async legs), Part 21 (sync replication, sharding), Part 24 (consistent hashing to add shards), Problem 18 (e-commerce reuses the same saga + idempotency spine).
+- **Cross-refs:** Part 13.5 (delivery semantics, outbox pattern — the *publish-and-commit-atomically* problem this design implies), Part 4 (CAP — this is the CP example), Part 13/14 (queues for the async legs), Part 21 (sync replication, sharding), Part 24 (consistent hashing to add shards), Problem 18 (e-commerce reuses the same saga + idempotency spine).
 
 *— Design Problem 16 complete —*

@@ -5,6 +5,8 @@
 > **Format:** Written as **Q&A** — my prompts are the questions, the explanations are the answers. Complete capture of the chat, reorganized and expanded. Diagrams, the three big players, failure-handling, and interview Q&A included.
 >
 > **Continues:** builds on Part 3 (async for throughput, buffering spikes). Ties to Part 11 (idempotency).
+>
+> ➡️ **Continues into [Part 13.5 — Message Brokers Deep Dive](13.5-message-brokers-deep-dive.md).** This part is the **introduction**: why async, the three big players, retries and DLQs. Part 13.5 is the **production layer** — delivery semantics, **ordering & partition keys**, **consumer groups and the scaling ceiling**, consumer lag, the **transactional outbox pattern** (*"what if the DB write succeeds but the publish fails?"*), DLQ redrive, and a decision tree covering BullMQ / Redis Streams / SNS+SQS / Kinesis / NATS / Pulsar.
 
 ---
 
@@ -150,6 +152,8 @@ Four wins:
 
 > **Shorthand:** RabbitMQ for smart-routed task queues; Kafka for high-volume event streaming + replay; SQS for a queue with zero ops on AWS.
 
+> 📌 **The deeper decision rule** — *do multiple independent consumers need the same message, and might a future consumer need it too?* **Yes → log** (Kafka). **No, it's work to be done once → queue** (RabbitMQ/SQS/BullMQ). That question decides it more reliably than throughput numbers do. Full decision tree plus the wider landscape (BullMQ, Redis Streams, SNS→SQS, Kinesis, NATS, Pulsar) in **[Part 13.5 §8–9](13.5-message-brokers-deep-dive.md#landscape)**.
+
 ---
 
 <a name="failure"></a>
@@ -193,7 +197,7 @@ Ask: *"if this fails, does the success I already reported become a lie?"*
   2. **Async with honest pending status** — respond `"Order received, payment processing…"` (not "confirmed"), then notify when resolved: "✅ confirmed" / "❌ failed, retry." Often paired with **compensation/saga** (auto-cancel/refund if a later step fails).
 
 ## Retries mean duplicates → workers must be idempotent
-Most queues are **at-least-once**, so the same message may be processed twice. Workers must be **idempotent** — safe to run twice (e.g. "charge payment" checks "did I already charge this order ID?" so a retry doesn't double-charge). *(Same idempotency idea as Part 11.)*
+Most queues are **at-least-once**, so the same message may be processed twice. *(Full treatment of at-most / at-least / "exactly" once — and why **exactly-once = at-least-once delivery + idempotent writes** — in [Part 13.5 §2](13.5-message-brokers-deep-dive.md#semantics).)* Workers must be **idempotent** — safe to run twice (e.g. "charge payment" checks "did I already charge this order ID?" so a retry doesn't double-charge). *(Same idempotency idea as Part 11.)*
 
 > **One-liner:** a quick async response only claims what actually succeeded, never the pending work. The queue durably stores the task before you respond, so it can't be lost; failures are retried with backoff, then parked in a DLQ with an alert — never silently dropped. For work whose failure *would* make your response a lie (payment), don't fully async it — stay synchronous or report a "pending" status and notify on resolution. Retries make idempotency mandatory.
 

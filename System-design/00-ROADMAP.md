@@ -42,6 +42,7 @@ Parts 1–27 are **already written** (✅), and all 19 problems below now have a
 | 11 | API design | ✅ done |
 | 12 | GraphQL basics | ✅ done |
 | 13 | Message queues | ✅ done |
+| 13.5 | **Message brokers deep dive** (delivery semantics, ordering, consumer groups, **outbox pattern**, choosing a broker) | ✅ done |
 | 14 | Event-driven architecture | ✅ done |
 | 15 | Authentication vs authorization | ✅ done |
 | 16 | JWT deep dive | ✅ done |
@@ -136,7 +137,7 @@ Problems 16–19 were added specifically to cover signature challenges the first
 | Priority | Topics |
 |---|---|
 | ⭐⭐⭐⭐⭐ | Requirements+estimation · Caching (05/05.5) · Database choice+indexing · Load balancing+scaling (02/02.5/21) · The 9-step framework itself |
-| ⭐⭐⭐⭐☆ | API design · Message queues/event-driven · Auth/JWT/OAuth · CDN · CAP theorem · Consistent hashing · Bloom filter |
+| ⭐⭐⭐⭐☆ | API design · Message queues/event-driven (**13.5: outbox, ordering, consumer groups**) · Auth/JWT/OAuth · CDN · CAP theorem · Consistent hashing · Bloom filter |
 | ⭐⭐⭐☆☆ | Design patterns · Rate limiting · WebSockets/realtime · Sessions · Password hashing |
 | ⭐⭐☆☆☆ | GraphQL · Search/inverted index · File upload internals |
 

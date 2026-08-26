@@ -371,6 +371,6 @@ Phase 2 handles **N values per window instead of millions of events** — a triv
 - **Storage:** Kafka (hot log) → object storage Parquet (cold, years); **columnar OLAP** (Druid/ClickHouse) for serving — few columns, huge row counts, compresses and vectorizes. **Rollup** minute → hour → day. Pre-aggregate only the common dimension combos; the full cube is 2^d and explodes.
 - **Scale:** partition by `adId` so each aggregator owns its keys. **Hot key → two-phase aggregation with salting:** phase 1 partial by `(adId+salt)`, phase 2 merge by `adId`. Works for **associative** aggregations (sum/count/min/max/HLL), not order-dependent ones.
 - **Ingest is stateless + `202`;** Kafka is the shock absorber; **backpressure, never drop** (a lost click is unrecoverable revenue). **Consumer lag = primary health metric.**
-- **Cross-refs:** Part 13/14 (log, queues, event-driven), Part 27 (Bloom filter — reused for dedup and frequency capping), Part 24 (partitioning/consistent hashing), Problem 16 (idempotency-key discipline + reconciliation, same spine).
+- **Cross-refs:** **Part 13.5** (ordering/partition keys, consumer groups & the scaling ceiling, consumer lag, exactly-once), Part 13/14 (log, queues, event-driven), Part 27 (Bloom filter — reused for dedup and frequency capping), Part 24 (partitioning/consistent hashing), Problem 16 (idempotency-key discipline + reconciliation, same spine).
 
 *— Design Problem 19 complete —*

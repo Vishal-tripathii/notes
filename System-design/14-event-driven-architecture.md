@@ -5,6 +5,8 @@
 > **Format:** Written as **Q&A** — my prompts are the questions, the explanations are the answers. Complete capture of the chat, reorganized and expanded. Diagrams, worked examples, and interview Q&A included.
 >
 > **Continues:** Part 13 (Message Queues). The producer→queue→consumer pattern is the engine; EDA is the architecture built on it. Ties to Part 4 (eventual consistency) and Part 11 (idempotency).
+>
+> ➡️ **See also [Part 13.5 — Message Brokers Deep Dive](13.5-message-brokers-deep-dive.md)** for the mechanics underneath these patterns: ordering guarantees, consumer groups, consumer lag, and the **transactional outbox pattern** — how to publish an event and commit a database change **atomically**, which is the first hard problem every event-driven design runs into.
 
 ---
 
