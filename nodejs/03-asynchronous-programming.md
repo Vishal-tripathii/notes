@@ -22,15 +22,16 @@
 6. [Promise combinators](#combinators)
 7. [Error propagation & the traps](#errors)
 8. [Patterns: timeout, retry, concurrency limit](#patterns)
-9. [Interview Questions & Answers](#interview)
-10. [Cheat Sheet](#cheatsheet)
+9. [Worked example: `addUser` in every style](#worked-example) ⭐
+10. [Interview Questions & Answers](#interview)
+11. [Cheat Sheet](#cheatsheet)
 
 ---
 
 <a name="callbacks"></a>
 # 1. Callbacks — and the 6 real problems
 
-**What it is:** you hand a function to an async operation — *"run this when you're done."*
+> **Definition:** a **callback** is a function you pass into another function, to be invoked *later* once some asynchronous work finishes — instead of returning a value right away, the async function *calls you back* with the result (or an error) whenever it's actually ready.
 
 > **Analogy 📞 — leaving your phone number.** You call a shop about an out-of-stock part. You don't stay on the line for three days. You leave your number and hang up; they call you back.
 
@@ -92,6 +93,8 @@ You hand **your** function to **their** code and hope they call it once, with th
 <a name="hell"></a>
 # 2. Callback hell — why it's shaped like a pyramid
 
+> **Definition:** **callback hell** (the "pyramid of doom") is what happens when several async steps each depend on the result of the one before — every next call has to be *nested inside* the previous callback, since that's the only place its result is in scope. The code grows rightward, one indent level per async step, instead of downward.
+
 ```js
 getUserCB(1, (err, user) => {
   if (err) return done(err);                       // check #1
@@ -121,7 +124,7 @@ getUserCB(1, (err, user) => {
 <a name="promises"></a>
 # 3. Promises — which problems they fixed
 
-**A promise is an object representing a value that isn't ready yet.** Three states, and it changes **once**:
+> **Definition:** a **promise** is an object representing a value that doesn't exist *yet* — it's returned immediately, in one of three states, and it **settles** (moves from pending to fulfilled or rejected) exactly once, then stays that way forever.
 
 ```
                 ┌──▶  FULFILLED  (has a value)
@@ -183,7 +186,7 @@ getUser(1)
 <a name="await"></a>
 # 4. async/await — the last two
 
-Syntactic sugar over promises. Same machinery, reads top-to-bottom.
+> **Definition:** `async`/`await` is **syntactic sugar over promises**, not a new concurrency mechanism — the same promise machinery runs underneath (an `async` function still returns a promise), but the code is written to read top-to-bottom like ordinary synchronous code instead of a `.then()` chain.
 
 > **Analogy 🍔 — same buzzer, different choice.** `.then()` is *"give me the buzzer, I'll browse the shops."* `await` is *"I'll stand right here until it buzzes."* **You're still not blocking the restaurant** — other customers get served. You just chose to wait before doing *your* next thing.
 
@@ -233,6 +236,8 @@ async function handler(req, res) {
 
 <a name="combinators"></a>
 # 6. Promise combinators
+
+> **Definition:** a **combinator** here is a static `Promise` method that takes an **array of promises** and returns one new promise describing how they combine. Four ship in JS, each with different resolve/reject rules — picking the wrong one is a common bug, not just a style choice.
 
 > **Analogy 🍽️ — ordering for a table of four.**
 > - **`all`** — nobody eats until all four dishes arrive; one ruined = order off
@@ -311,6 +316,8 @@ const failed = outcomes.filter(o => o.status === 'rejected').map(o => o.reason);
 <a name="errors"></a>
 # 7. Error propagation & the traps
 
+> **Definition:** **error propagation** is how a failure travels from where it happened to wherever it's actually handled. With callbacks that's entirely manual — you check the `err` argument yourself, every single level. With promises and `async`/`await` it's automatic: a `throw` or a rejection walks up the chain on its own until a `.catch()` or `try/catch` catches it — and if nothing ever does, it becomes an **unhandled rejection**.
+
 ### Trap 1 — a missing `await` swallows the error ⭐ *most common in production*
 ```js
 async function handler(req, res) {
@@ -357,6 +364,8 @@ one .catch at the end  → covers the whole chain above it
 <a name="patterns"></a>
 # 8. Patterns: timeout, retry, concurrency limit
 
+> **Definition:** three small, reusable wrappers built on top of the combinators above, each solving a distinct production problem — a dependency that never responds (**timeout**), one that fails intermittently (**retry**), and firing more parallel work than the system downstream can actually take (**concurrency limit**).
+
 ```js
 // TIMEOUT — race anything against a timer
 const withTimeout = (promise, ms) => Promise.race([
@@ -384,8 +393,72 @@ await Promise.all(ids.map(id => limit(() => getUser(id))));
 
 ---
 
+<a name="worked-example"></a>
+# 9. Worked example: `addUser` in every style ⭐
+
+Same operation — insert a user, get back `{ id, name }` — written four ways, so the differences are visible side by side instead of abstract.
+
+### ① Callback style
+
+```js
+function addUserCB(name, callback) {
+  db.query('INSERT INTO users (name) VALUES (?)', [name], (err, result) => {
+    if (err) return callback(err);                     // error-first: check err, every time
+    callback(null, { id: result.insertId, name });
+  });
+}
+
+addUserCB('Vishal', (err, user) => {
+  if (err) return console.error('failed:', err.message);
+  console.log('created:', user);
+});
+```
+
+### ② Promise style — wrapping the callback API
+
+This is the **only place new code has to be written** to move on from callbacks — everything below just *consumes* this same function.
+
+```js
+function addUserPromise(name) {
+  return new Promise((resolve, reject) => {
+    db.query('INSERT INTO users (name) VALUES (?)', [name], (err, result) => {
+      if (err) return reject(err);                      // → promise settles REJECTED
+      resolve({ id: result.insertId, name });            // → promise settles FULFILLED
+    });
+  });
+}
+```
+
+> In practice, most modern DB drivers (e.g. `mongoose`, `pg`) already return a promise natively — you only hand-write `new Promise(...)` like this when wrapping an **old callback-only API**. This is the manual version so the mechanism is visible.
+
+### ③ `.then()` / `.catch()` — consuming the promise
+
+```js
+addUserPromise('Vishal')
+  .then(user => console.log('created:', user))
+  .catch(err => console.error('failed:', err.message));
+```
+
+### ④ `async`/`await` — consuming the *same* promise
+
+```js
+async function createUser(name) {
+  try {
+    const user = await addUserPromise(name);   // ⭐ same function as ②, not reimplemented
+    console.log('created:', user);
+    return user;
+  } catch (err) {
+    console.error('failed:', err.message);
+  }
+}
+```
+
+**The point of putting these four together:** ① is a wholly separate implementation, because callbacks aren't promises — there's no way to `await` `addUserCB` without wrapping it first. But ②, ③, and ④ are **one implementation, two ways of consuming it** — `.then()`/`.catch()` and `await`/`try-catch` are just different syntax over the exact same `addUserPromise` promise. That's the whole relationship from [§4](#await) made concrete: `async`/`await` doesn't replace promises, it's sugar for consuming them.
+
+---
+
 <a name="interview"></a>
-# 9. Interview Questions & Answers
+# 10. Interview Questions & Answers
 
 ### Q1. Why shouldn't `await` be used inside loops?
 > "Because it **serializes work that could run in parallel** — each iteration waits for the previous one."
@@ -430,7 +503,7 @@ const [a, b] = await Promise.all([getUser(), getOrders()]);  // 200ms parallel
 ---
 
 <a name="cheatsheet"></a>
-# 10. Cheat Sheet
+# 11. Cheat Sheet
 
 ### The 6 problems → what fixed them
 ```

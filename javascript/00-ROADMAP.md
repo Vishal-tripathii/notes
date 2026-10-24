@@ -1,6 +1,6 @@
 # 🟨 JavaScript Study Notes — Master Roadmap
 
-> **Purpose:** the full study plan for the JavaScript track — the language underneath everything else in this repo. 27 parts, ordered so each depends only on what came before it. Every part is its own note file in this folder (`NN-topic-slug.md`), same convention as [Angular](../Angular/00-ROADMAP.md) and [nodejs](../nodejs/).
+> **Purpose:** the full study plan for the JavaScript track — the language underneath everything else in this repo. 28 parts, ordered so each depends only on what came before it. Every part is its own note file in this folder (`NN-topic-slug.md`), same convention as [Angular](../Angular/00-ROADMAP.md) and [nodejs](../nodejs/).
 >
 > **Format per part:** a proper definition for every concept, code snippets, predict-before-you-run output, interview Q&A, and follow-up scenario-style challenge questions.
 >
@@ -41,6 +41,7 @@
 | 24 | [Output-Based Question Drills](24-output-based-question-drills.md) | ⭐⭐⭐⭐⭐ | ✅ done (25 of 50+ target) |
 | 25 | [Coding & Machine Coding Round](25-coding-and-machine-coding-round.md) | ⭐⭐⭐⭐⭐ | ✅ done |
 | 26 | [Interview Discussion Practice](26-interview-discussion-practice.md) | ⭐⭐⭐⭐⭐ | ✅ done |
+| 27 | [Workers & Parallelism](27-workers-and-parallelism.md) | ⭐⭐⭐⭐☆ | ✅ done |
 
 **If you have one week left:** closures + event loop + promises/async-await + `this` + prototypes + output-based drills (Parts 01, 03, 08, 10–12, 24). Those six carry most JavaScript interviews.
 
@@ -184,6 +185,10 @@ Deep Clone · Flatten Array/Object · Event Emitter · Pub/Sub · LRU Cache · P
 
 Explain out loud, without notes: Event Loop · Closures · Execution Context · Prototype Chain · single-threading · `async`/`await` · `map` vs `forEach` · shallow vs deep copy · Promise lifecycle.
 
+## Part 27 — [Workers & Parallelism](27-workers-and-parallelism.md) ⭐⭐⭐⭐☆
+
+Web Worker (`postMessage`/`onmessage`, `SharedArrayBuffer`, transferable objects) · Service Worker (install/activate/fetch lifecycle, caching strategies, offline, push) · placed side by side with Node's `worker_threads`/`cluster`/`child_process` ([nodejs/02-nodejs-internals.md](../nodejs/02-nodejs-internals.md)) so it's clear which runtime each belongs to and when to reach for which.
+
 ---
 
 # Interview priority — what to revise last
@@ -191,7 +196,7 @@ Explain out loud, without notes: Event Loop · Closures · Execution Context · 
 | Priority | Topics |
 |---|---|
 | ⭐⭐⭐⭐⭐ | Closures · Functions · `this`/`call`/`apply`/`bind` · Objects · Arrays · Prototype & Inheritance · Event Loop · Promises · async/await · Advanced Functional Patterns · Polyfills · Event Delegation · Output Drills · Machine Coding · Discussion Practice |
-| ⭐⭐⭐⭐☆ | JS Fundamentals · Classes |
+| ⭐⭐⭐⭐☆ | JS Fundamentals · Classes · Workers & Parallelism |
 | ⭐⭐⭐☆☆ | Strings & Regex · Destructuring · Error Handling · Map/Set/WeakMap/WeakSet · Modules · Memory Management · Browser APIs · Performance Patterns · Modern Features |
 | ⭐⭐☆☆☆ | Generators & Iterators |
 
