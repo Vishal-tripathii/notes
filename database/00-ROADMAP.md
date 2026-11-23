@@ -1,6 +1,6 @@
 # 🗄️ Database & MongoDB Study Notes — Master Roadmap
 
-> **Purpose:** the full study plan for the database track — SQL fundamentals, MongoDB in depth, and Redis, in the order a Node/full-stack interview actually probes them. 22 parts (20 core + Part 04.5 and Part 20 added for foreign-key/cascading coverage and a consolidated SQL vs NoSQL comparison), each becoming a note file in this folder (`NN-topic-slug.md`), written after the topic is explained in chat — same convention as [Angular](../Angular/00-ROADMAP.md), [nodejs](../nodejs/), and [javascript](../javascript/00-ROADMAP.md).
+> **Purpose:** the full study plan for the database track — SQL fundamentals, MongoDB in depth, and Redis, in the order a Node/full-stack interview actually probes them. 34 parts: the original 22 (20 core + Part 04.5 and Part 20), plus 12 parts added after a gap review against a **4-years-experience** bar (marked 🆕 below — locking/anomalies, write & read concern, normalization and schema patterns, SQL query patterns, migrations, storage internals, IDs, views/triggers, observability). Each part is a note file in this folder (`NN-topic-slug.md`), written after the topic is explained in chat — same convention as [Angular](../Angular/00-ROADMAP.md), [nodejs](../nodejs/), and [javascript](../javascript/00-ROADMAP.md).
 >
 >
 > **Target:** interview-ready for a Node.js + MongoDB role (per [the JD this repo is tracking](../nodejs/JD-NodeFullStack-3YR-QNA.md)) — SQL to the depth a full-stack interview expects (joins, indexes, transactions), MongoDB in real depth since it's a JD must-have, Redis to the depth it's actually used (caching, not Redis-as-a-database).
@@ -30,16 +30,23 @@ Step 3 is the one that turns "I know the syntax" into "I can explain why it's sl
 | # | Part | Priority | Status |
 |---|---|---|---|
 | 00 | SQL Basics | ⭐⭐⭐⭐⭐ | ✅ done |
+| 00.5 | 🆕 [SQL Query Patterns — NULL logic, subqueries, `EXISTS`/`IN`, `UNION`, `CASE`, ranking](00.5-sql-query-patterns-and-null.md) | ⭐⭐⭐⭐⭐ | ✅ done |
 | 01 | Joins | ⭐⭐⭐⭐⭐ | ✅ done |
 | 02 | SQL Indexes | ⭐⭐⭐⭐⭐ | ✅ done |
 | 03 | Query Optimization & `EXPLAIN` | ⭐⭐⭐⭐⭐ | ✅ done |
 | 04 | Transactions & ACID | ⭐⭐⭐⭐⭐ | ✅ done |
 | 04.5 | Foreign Keys, Cascading & Referential Integrity | ⭐⭐⭐⭐☆ | ✅ done |
+| 04.6 | 🆕 [Locking, Deadlocks & Concurrency Anomalies (lost update, write skew)](04.6-locking-deadlocks-and-anomalies.md) | ⭐⭐⭐⭐⭐ | ✅ done |
 | 05 | MongoDB Fundamentals | ⭐⭐⭐⭐⭐ | ✅ done |
+| 05.5 | 🆕 [MongoDB Write Concern, Read Concern & Read Preference](05.5-mongodb-write-concern-read-concern-read-preference.md) | ⭐⭐⭐⭐⭐ | ✅ done |
+| 05.6 | 🆕 [MongoDB Atomic Writes — upsert, `findOneAndUpdate`, array operators, `bulkWrite`](05.6-mongodb-atomic-writes-upsert-bulk.md) | ⭐⭐⭐⭐☆ | ✅ done |
 | 06 | MongoDB Indexes | ⭐⭐⭐⭐⭐ | ✅ done |
+| 06.5 | 🆕 [MongoDB Indexing Deep Dive — multikey, sorts, `explain()` numbers, index ops](06.5-mongodb-indexing-deep-dive.md) | ⭐⭐⭐⭐☆ | ✅ done |
 | 07 | Populate & the N+1 Problem | ⭐⭐⭐⭐⭐ | ✅ done |
 | 08 | Aggregation Pipeline | ⭐⭐⭐⭐⭐ | ✅ done |
+| 08.5 | 🆕 [Aggregation — Advanced Stages & Limits](08.5-aggregation-advanced.md) | ⭐⭐⭐☆☆ | ✅ done |
 | 09 | Schema Design — Embedding vs Referencing | ⭐⭐⭐⭐⭐ | ✅ done |
+| 09.5 | 🆕 [Normalization & MongoDB Schema Design Patterns](09.5-normalization-and-mongodb-schema-patterns.md) | ⭐⭐⭐⭐⭐ | ✅ done |
 | 10 | Pagination | ⭐⭐⭐⭐☆ | ✅ done |
 | 11 | Redis Basics & Caching | ⭐⭐⭐⭐☆ | ✅ done |
 | 12 | Connection Pooling | ⭐⭐⭐☆☆ | ✅ done |
@@ -51,8 +58,15 @@ Step 3 is the one that turns "I know the syntax" into "I can explain why it's sl
 | 18 | Production Scenario Practice | ⭐⭐⭐⭐⭐ | ✅ done |
 | 19 | Machine Coding — Query & Aggregation Practice | ⭐⭐⭐⭐☆ | ✅ done |
 | 20 | SQL vs NoSQL — Point-by-Point Comparison | ⭐⭐⭐⭐⭐ | ✅ done |
+| 21 | 🆕 [Schema Validation & Zero-Downtime Migrations](21-schema-validation-and-migrations.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 22 | 🆕 [Storage Internals — pages, WAL, B+Tree vs LSM, MVCC, VACUUM](22-storage-internals.md) | ⭐⭐⭐☆☆ | ✅ done |
+| 23 | 🆕 [Primary Keys & ID Generation — auto-increment, UUIDv4/v7, ObjectId, Snowflake](23-primary-keys-and-id-generation.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 24 | 🆕 [Views, Materialized Views, Triggers & Stored Procedures](24-views-triggers-stored-procedures.md) | ⭐⭐⭐☆☆ | ✅ done |
+| 25 | 🆕 [Database Observability & Troubleshooting](25-database-observability.md) | ⭐⭐⭐⭐☆ | ✅ done |
 
-> All 22 parts written. Part 20 is cross-linked from every part throughout this track wherever a SQL/NoSQL comparison naturally comes up (Joins, Indexes, Transactions, Aggregation, Embedding, Sharding) rather than duplicated in each — revisit Part 20 itself for the consolidated view. Revisit per the suggested schedule/priority table below rather than treating this as a one-time read.
+**Also extended in the gap review:** Part 11 (§5.5 the race delete-on-write still has), Part 12 (PgBouncer, serverless, pool sizing, Mongo pooling), Part 13 (sync vs async replication, failover & split brain, physical vs logical), Part 17 (soft deletes + partial unique indexes), Part 19 (§6 — 12 classic SQL interview problems).
+
+> All 34 parts written. Part 20 is cross-linked from every part throughout this track wherever a SQL/NoSQL comparison naturally comes up (Joins, Indexes, Transactions, Aggregation, Embedding, Sharding) rather than duplicated in each — revisit Part 20 itself for the consolidated view. Revisit per the suggested schedule/priority table below rather than treating this as a one-time read.
 
 ---
 
@@ -218,12 +232,12 @@ Write real queries against a real (small, seeded) dataset — not recall syntax 
 
 | Priority | Topics |
 |---|---|
-| ⭐⭐⭐⭐⭐ | SQL Basics · Joins · Indexes (SQL & Mongo) · Query Optimization · Transactions & ACID · MongoDB Fundamentals · Populate/N+1 · Aggregation Pipeline · Embedding vs Referencing · Production Scenarios |
-| ⭐⭐⭐⭐☆ | Pagination · Redis Caching · Query/Aggregation machine coding |
-| ⭐⭐⭐☆☆ | Connection Pooling · Replication · Sharding · Mongo Transactions & Concurrency |
+| ⭐⭐⭐⭐⭐ | SQL Basics · **SQL Query Patterns (00.5)** · Joins · Indexes (SQL & Mongo) · Query Optimization · Transactions & ACID · **Locking & anomalies (04.6)** · MongoDB Fundamentals · **Write/read concern (05.5)** · Populate/N+1 · Aggregation Pipeline · Embedding vs Referencing · **Normalization & schema patterns (09.5)** · Production Scenarios |
+| ⭐⭐⭐⭐☆ | Pagination · Redis Caching · Query/Aggregation/SQL machine coding · Atomic writes (05.6) · Index deep dive (06.5) · Migrations (21) · IDs (23) · Observability (25) |
+| ⭐⭐⭐☆☆ | Connection Pooling · Replication · Sharding · Mongo Transactions & Concurrency · Advanced aggregation (08.5) · Storage internals (22) · Views/triggers (24) |
 | ⭐⭐☆☆☆ | Advanced SQL · Advanced Indexing & Partitioning |
 
-If you have one week left: SQL joins + indexes + MongoDB indexes + aggregation + embedding-vs-referencing + the production scenario list. Those six carry most database interview rounds on this JD.
+If you have one week left: SQL joins + indexes + MongoDB indexes + aggregation + embedding-vs-referencing + the production scenario list. Those six carry most database interview rounds on this JD. **For a 4-years-experience round, add:** 04.6 (lost update, write skew, deadlocks), 05.5 (write/read concern), 00.5 + Part 19 §6 (writing SQL live), and 21 (zero-downtime migrations) — those are the follow-ups that separate a senior answer from a junior one.
 
 ---
 

@@ -110,3 +110,157 @@ The "fetch `limit + 1`" trick avoids a separate `count()` query just to know whe
 ```
 
 Every relationship above is justified by the same three factors from Part 09 §1: read-together frequency, unbounded-growth risk against the 16MB cap, and independent-query need — not a single fixed rule applied uniformly.
+
+---
+
+<a name="sql"></a>
+## 6. SQL query practice — the classic interview problems
+
+The MongoDB exercises above don't cover the SQL you'll be asked to write on a whiteboard. Concepts are in [Part 00.5](00.5-sql-query-patterns-and-null.md) and [Part 16](16-advanced-sql.md). Try each one before reading the answer.
+
+**Schema used below:**
+```sql
+employees(id, name, salary, dept_id, manager_id)
+departments(id, name)
+customers(id, name, email, city)
+orders(id, customer_id, amount, status, created_at)
+logins(user_id, login_date)
+```
+
+### 6.1 Second-highest salary (and the Nth)
+```sql
+-- 2nd highest distinct salary; returns NULL if there isn't one
+SELECT MAX(salary) FROM employees
+WHERE salary < (SELECT MAX(salary) FROM employees);
+
+-- Nth highest — general form
+SELECT DISTINCT salary FROM (
+  SELECT salary, DENSE_RANK() OVER (ORDER BY salary DESC) AS rk FROM employees
+) t WHERE rk = 3;
+```
+Why `DENSE_RANK`: with salaries 100, 100, 90 the 2nd highest is 90. `ROW_NUMBER` would say 100; `RANK` would skip 2 entirely. The `LIMIT 1 OFFSET 1` answer is wrong for the same reason unless you add `DISTINCT`.
+
+### 6.2 Highest-paid employee(s) per department, ties included
+```sql
+WITH ranked AS (
+  SELECT e.*, RANK() OVER (PARTITION BY dept_id ORDER BY salary DESC) AS rk
+  FROM employees e
+)
+SELECT d.name AS dept, r.name, r.salary
+FROM ranked r JOIN departments d ON d.id = r.dept_id
+WHERE r.rk = 1;
+```
+`GROUP BY dept_id` + `MAX(salary)` gives the salary but not *who* — selecting `name` there is invalid ([Part 00.5 §10](00.5-sql-query-patterns-and-null.md)).
+
+### 6.3 Top 3 orders per customer
+```sql
+SELECT * FROM (
+  SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY amount DESC, id) AS rn
+  FROM orders o
+) t WHERE rn <= 3;
+```
+`id` as a tie-breaker makes the result deterministic. Same problem in MongoDB: §2 above and [Part 08.5 §6](08.5-aggregation-advanced.md).
+
+### 6.4 Find duplicate emails, then delete duplicates keeping the oldest
+```sql
+SELECT email, COUNT(*) FROM customers GROUP BY email HAVING COUNT(*) > 1;
+
+-- delete all but the lowest id per email
+WITH d AS (
+  SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY id) AS rn FROM customers
+)
+DELETE FROM customers WHERE id IN (SELECT id FROM d WHERE rn > 1);
+
+-- Postgres alternative: self-join delete
+DELETE FROM customers a USING customers b WHERE a.email = b.email AND a.id > b.id;
+```
+Then add `UNIQUE (email)` so it can't happen again.
+
+### 6.5 Customers who never ordered
+```sql
+SELECT c.* FROM customers c
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+```
+Not `NOT IN` — if `orders.customer_id` contains a NULL, `NOT IN` returns nothing ([Part 00.5 §2](00.5-sql-query-patterns-and-null.md)).
+
+### 6.6 Employees who earn more than their manager
+```sql
+SELECT e.name, e.salary, m.name AS manager, m.salary AS manager_salary
+FROM employees e JOIN employees m ON m.id = e.manager_id
+WHERE e.salary > m.salary;
+```
+Inner join on purpose — employees without a manager can't qualify.
+
+### 6.7 Monthly revenue and month-over-month growth
+```sql
+WITH monthly AS (
+  SELECT date_trunc('month', created_at) AS month, SUM(amount) AS revenue
+  FROM orders WHERE status = 'paid'
+  GROUP BY 1
+)
+SELECT month, revenue,
+       revenue - LAG(revenue) OVER (ORDER BY month)                                     AS change,
+       ROUND(100.0 * (revenue - LAG(revenue) OVER (ORDER BY month))
+             / NULLIF(LAG(revenue) OVER (ORDER BY month), 0), 1)                         AS pct_change
+FROM monthly ORDER BY month;
+```
+(MySQL: `DATE_FORMAT(created_at, '%Y-%m-01')` instead of `date_trunc`.) `NULLIF` avoids divide-by-zero; the first month's change is NULL.
+
+### 6.8 Running total per customer
+```sql
+SELECT customer_id, created_at, amount,
+       SUM(amount) OVER (PARTITION BY customer_id ORDER BY created_at, id
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total
+FROM orders;
+```
+`ROWS` (not the default `RANGE`) so two orders with the same timestamp don't both show the combined total ([Part 00.5 §8](00.5-sql-query-patterns-and-null.md)).
+
+### 6.9 Users who logged in on 3+ consecutive days (gaps and islands)
+```sql
+WITH d AS (
+  SELECT DISTINCT user_id, login_date FROM logins
+),
+g AS (
+  SELECT user_id, login_date,
+         login_date - (ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY login_date))::int AS grp
+  FROM d
+)
+SELECT user_id, MIN(login_date) AS streak_start, COUNT(*) AS days
+FROM g GROUP BY user_id, grp
+HAVING COUNT(*) >= 3;
+```
+The trick: within a run of consecutive dates, `date − row_number` is constant, so it labels each "island." (MySQL: `DATE_SUB(login_date, INTERVAL rn DAY)`.)
+
+### 6.10 Pivot: order counts per status, one row per customer
+```sql
+SELECT customer_id,
+       COUNT(*) FILTER (WHERE status = 'paid')     AS paid,        -- Postgres
+       COUNT(*) FILTER (WHERE status = 'refunded') AS refunded,
+       SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS paid_amount   -- portable form
+FROM orders GROUP BY customer_id;
+```
+
+### 6.11 Full reporting chain for an employee (recursive CTE)
+```sql
+WITH RECURSIVE chain AS (
+  SELECT id, name, manager_id, 0 AS level FROM employees WHERE id = 42
+  UNION ALL
+  SELECT m.id, m.name, m.manager_id, c.level + 1
+  FROM employees m JOIN chain c ON m.id = c.manager_id
+)
+SELECT * FROM chain ORDER BY level;
+```
+MongoDB equivalent: `$graphLookup` ([Part 08.5 §5](08.5-aggregation-advanced.md)).
+
+### 6.12 Customers who ordered in January but not in February
+```sql
+SELECT DISTINCT o.customer_id FROM orders o
+WHERE o.created_at >= '2026-01-01' AND o.created_at < '2026-02-01'
+  AND NOT EXISTS (
+    SELECT 1 FROM orders f
+    WHERE f.customer_id = o.customer_id
+      AND f.created_at >= '2026-02-01' AND f.created_at < '2026-03-01');
+```
+Half-open date ranges (`>= start AND < next_start`) avoid the "midnight on the last day" bug and stay index-friendly ([Part 02 §6](02-sql-indexes.md)).
+
+**After writing each one:** run `EXPLAIN` on it and name the index that would make it fast (e.g. 6.3 → `orders(customer_id, amount DESC)`; 6.5 → `orders(customer_id)`).

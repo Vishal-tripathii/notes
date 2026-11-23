@@ -4,7 +4,7 @@
 >
 > Answers are the *spoken* version, not the essay. Sections link to the note that explains them properly.
 >
-> **~146 questions · 20 sections**
+> **~146 questions · 20 sections**, plus **section 21: 12 senior follow-up questions** from the gap review (each new part also has its own Q&A section).
 
 ---
 
@@ -32,6 +32,7 @@
 | 18 | [Advanced SQL](#s18) | [Part 16](16-advanced-sql.md) |
 | 19 | [Advanced Indexing & Partitioning](#s19) | [Part 17](17-advanced-indexing-and-partitioning.md) |
 | 20 | [SQL vs NoSQL — the Decision](#s20) ⭐ | [Part 20](20-sql-vs-nosql-comparison.md) |
+| 21 | [Senior follow-ups (4 years' experience)](#s21) ⭐ | Parts 00.5, 04.6, 05.5, 05.6, 06.5, 09.5, 21–25 |
 
 ---
 
@@ -673,6 +674,47 @@ Reach for SQL when the data is genuinely relational and correctness depends on i
 
 ### What's the honest framing an interviewer is actually listening for here?
 Named, specific factors weighed against the actual system under discussion — not "NoSQL is more scalable" as a blanket claim, which reads as marketing rather than engineering judgment. The strongest answers name both sides of the trade-off explicitly, the way the comparison table in [Part 20](20-sql-vs-nosql-comparison.md) lays it out axis by axis.
+
+---
+
+<a name="s21"></a>
+# 21. ⭐ Senior follow-ups (4 years' experience)
+
+### Under Postgres's default isolation, two transactions both read "1 seat left" and both insert a booking. What happens, and how do you fix it?
+Both succeed — Read Committed doesn't stop a check-then-act race, since neither transaction saw uncommitted data. Fix with a unique constraint on the seat, `SELECT ... FOR UPDATE` on the seat row before checking, an atomic `UPDATE seats SET booked_by = ? WHERE id = ? AND booked_by IS NULL`, or `SERIALIZABLE` with a retry loop. → [Part 04 §1](04-transactions-and-acid.md), [Part 04.6](04.6-locking-deadlocks-and-anomalies.md)
+
+### What's write skew? Give an example Repeatable Read still allows.
+Two transactions read the same rows, decide, and each write a different row, breaking an invariant together — both on-call doctors go off call because each saw the other still on. Snapshot isolation allows it because there's no same-row conflict. Fix: `SERIALIZABLE`, `FOR UPDATE` on the rows read, or a constraint. → [Part 04.6 §4](04.6-locking-deadlocks-and-anomalies.md)
+
+### How do you prevent deadlocks, and what does the database do when one happens?
+It detects the cycle in its wait-for graph and rolls back one victim (MySQL 1213, Postgres 40P01) — a retryable error. Prevent with a consistent lock order (lower id first, sorted batches), short transactions, indexed `WHERE` clauses, lock timeouts, and always retrying. → [Part 04.6 §6](04.6-locking-deadlocks-and-anomalies.md)
+
+### You write with `w:1` and read from secondaries. A user updates their profile and sees old data. Which MongoDB settings fix it?
+Write with `w: "majority"` and read with `readConcern: "majority"` inside a causally consistent session — the secondary waits until it has the user's write. Or read that data from the primary. `w: "majority"` also prevents acknowledged writes being rolled back on failover. → [Part 05.5](05.5-mongodb-write-concern-read-concern-read-preference.md)
+
+### Index `{ status: 1, amount: 1, createdAt: -1 }`, query `status = 'x' AND amount > 100` sorted by `createdAt`. Good index?
+No — range (`amount`) before sort (`createdAt`) forces an in-memory sort. ESR says `{ status: 1, createdAt: -1, amount: 1 }`. → [Part 06 §3](06-mongodb-indexes.md)
+
+### Find the second-highest salary per department.
+`DENSE_RANK() OVER (PARTITION BY dept_id ORDER BY salary DESC)` in a CTE, then `WHERE rk = 2` — `DENSE_RANK` so tied top salaries don't hide the second value. → [Part 19 §6](19-machine-coding-practice.md)
+
+### `WHERE id NOT IN (SELECT manager_id FROM employees)` returns zero rows. Why?
+The subquery contains a NULL; `id <> NULL` is unknown, so `NOT IN` is never true. Use `NOT EXISTS`. → [Part 00.5 §2](00.5-sql-query-patterns-and-null.md)
+
+### Normalize a wide orders table to 3NF, then explain when you'd deliberately undo it.
+Split into customers, products, orders, order_items so every non-key column depends on the key, the whole key and nothing but the key — but keep `unit_price` on order_items as the price paid (a snapshot). Denormalize read models for measured reasons: counters, copied display fields, summary tables — each copy either a snapshot or kept in sync deliberately. → [Part 09.5](09.5-normalization-and-mongodb-schema-patterns.md)
+
+### How do you add a NOT NULL column to a 500M-row table without downtime?
+Constant default → `ADD COLUMN ... NOT NULL DEFAULT x` is metadata-only (PG 11+). Otherwise add nullable → write it in code → batched backfill → `CHECK (...) NOT VALID` → `VALIDATE` → `SET NOT NULL`, all with a short `lock_timeout`. → [Part 21 §5](21-schema-validation-and-migrations.md)
+
+### A post can get 50k likes. How do you model it in MongoDB?
+Not an array on the post. A `likes` collection with a unique `(postId, userId)` index, plus a `likeCount` maintained with `$inc` (Computed pattern), optionally a few recent likers embedded (Subset). Hot counters on viral posts → buffer or split. → [Part 09.5 §7](09.5-normalization-and-mongodb-schema-patterns.md)
+
+### Auto-increment or UUID primary key?
+`BIGINT` identity is smallest and appends to the index, but is central and leaks counts; UUIDv4 is distributed but random inserts fragment the B+Tree. Default: `BIGINT` internally + a public ID, or UUIDv7 (time-ordered) when IDs must be generated anywhere. → [Part 23](23-primary-keys-and-id-generation.md)
+
+### How do you find the slowest queries in production?
+Postgres `pg_stat_statements` sorted by **total** time (catches cheap queries called millions of times — N+1), slow-statement logs, `auto_explain`; MySQL slow log + `pt-query-digest`; MongoDB slow-op log and profiler. Then `EXPLAIN ANALYZE` and compare estimated vs actual rows. → [Part 25](25-database-observability.md)
 
 ---
 

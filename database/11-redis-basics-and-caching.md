@@ -13,8 +13,11 @@
 3. [TTL as a backstop](#ttl)
 4. [Cache invalidation on CRUD — delete vs update](#invalidation)
 5. [Cache stampede](#stampede)
+   - [5.5 The race delete-on-write still has](#race)
 6. [Interview Questions & Answers](#interview)
 7. [Cheat Sheet](#cheatsheet)
+
+> **Redis internals** (data structures, eviction policies, persistence, distributed locks) are covered in [System-design Part 05.5](../System-design/05.5-redis-deep-dive.md); caching strategies beyond cache-aside (write-through, write-behind) in [System-design Part 05](../System-design/05-caching.md).
 
 ---
 
@@ -91,6 +94,27 @@ async function updateUser(id, changes) {
 
 ---
 
+<a name="race"></a>
+## 5.5 The race delete-on-write still has
+
+Delete-on-write is the right default, but it isn't race-free. A slow reader can put a stale value back **after** the writer's delete:
+
+```
+cache empty; DB has v1
+Reader: cache MISS → reads v1 from DB ......................(slow: GC pause, network)
+Writer:                     UPDATE DB → v2 ; DEL cache key
+Reader: ......................................... SET cache = v1   ← stale, until TTL expires
+```
+
+The window is small (the reader's read must start before the write and its `SET` land after the delete), so it's rare — but on hot keys under heavy traffic, rare happens daily. Mitigations, cheapest first:
+- **Short TTLs** bound how long the stale value lives — the backstop from §3 is what makes this race tolerable.
+- **Delayed double delete:** delete on write, then delete again ~1s later (via a queued job), removing anything a slow reader re-inserted.
+- **Versioned values:** store a version/`updated_at` with the cached value and only overwrite with something newer (a small Lua script in Redis does the compare-and-set atomically).
+- **Leases** (Facebook's memcache paper): on a miss, the cache hands the reader a token; a delete invalidates outstanding tokens, so the stale `SET` is rejected.
+- **Invalidate from the database's change stream / CDC** instead of from app code, so cache invalidation is ordered after the actual commit.
+
+---
+
 <a name="interview"></a>
 ## 6. Interview Questions & Answers
 
@@ -103,6 +127,9 @@ A: A popular key expiring or being invalidated causes many concurrent requests t
 **Q: Why keep a TTL even if your invalidation logic is correct?**
 A: TTL is the backstop for invalidation paths you didn't account for — a direct DB write bypassing the app layer, a bug, a race condition. Without TTL, a missed invalidation means the cache is wrong forever; with it, staleness is bounded and self-heals.
 
+**Q: Can delete-on-write still leave stale data in the cache?**
+A: Yes — a reader that missed, read the old value from the DB, and was slow to write it back can re-insert the old value after the writer's delete. It's rare and bounded by TTL; for hot keys use a delayed second delete, versioned compare-and-set writes, or leases.
+
 ---
 
 <a name="cheatsheet"></a>
@@ -113,3 +140,4 @@ A: TTL is the backstop for invalidation paths you didn't account for — a direc
 - Delete-on-write > update-on-write: deleting can't encode a drifted-update-logic bug; the next read guarantees a correct refetch from the source of truth.
 - TTL is a backstop for invalidation paths you didn't think of — always set one.
 - Cache stampede = many concurrent misses on the same key hit the DB simultaneously. Fix with locking, request coalescing, or jittered TTLs.
+- Delete-on-write race: a slow reader re-caches the old value after the delete. Bounded by TTL; fix with delayed double delete, versioned compare-and-set, leases, or CDC-driven invalidation.
