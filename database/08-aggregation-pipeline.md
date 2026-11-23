@@ -75,21 +75,36 @@ Use `$lookup` when the join needs to participate in further aggregation (filter/
 
 There's an added benefit: an early `$match` on an indexed field can use that index the same way a normal `find()` query would — a `$match` placed later in the pipeline, after other stages have already reshaped the documents, generally cannot.
 
+Compare two pipelines that produce the **same result** — only the `$match` position differs:
+
 ```js
-// Inefficient — sorts and groups the entire collection before filtering
+// Inefficient — groups every order (completed AND cancelled AND pending), then throws most groups' inputs away
 db.orders.aggregate([
-  { $group: { _id: "$customerId", total: { $sum: "$amount" } } },
-  { $sort: { total: -1 } },
-  { $match: { total: { $gt: 1000 } } }
+  { $group: { _id: { customerId: "$customerId", status: "$status" }, total: { $sum: "$amount" } } },
+  { $match: { "_id.status": "completed" } },
+  { $sort: { total: -1 } }
 ])
 
-// Efficient — filters first, so later stages work on a much smaller set
+// Efficient — filter on a raw field first, so $group only sees completed orders (and the $match can use an index on status)
 db.orders.aggregate([
   { $match: { status: "completed" } },
   { $group: { _id: "$customerId", total: { $sum: "$amount" } } },
   { $sort: { total: -1 } }
 ])
 ```
+
+**Not every `$match` can move.** A filter on a field that a stage *creates* has to stay after that stage:
+
+```js
+db.orders.aggregate([
+  { $match: { status: "completed" } },                               // raw field → move as early as possible
+  { $group: { _id: "$customerId", total: { $sum: "$amount" } } },
+  { $match: { total: { $gt: 1000 } } },                              // `total` only exists after $group → must stay here
+  { $sort: { total: -1 } }
+])
+```
+
+The rule is "filter on raw fields as early as possible," not "every `$match` goes first." (MongoDB's optimizer also moves some `$match` stages earlier automatically, but only when it can prove the result doesn't change — don't rely on it.)
 
 ---
 

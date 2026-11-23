@@ -25,8 +25,27 @@
 |---|---|---|
 | **Atomicity** | all operations in a transaction succeed, or none do | transferring money: debit account A and credit account B either both happen or neither does — never just the debit |
 | **Consistency** | a transaction moves the database from one valid state to another, respecting all constraints | a `CHECK` constraint that balance can't go negative — a transaction that would violate it is rejected, not partially applied |
-| **Isolation** | concurrent transactions don't see each other's uncommitted changes | two people booking the last seat simultaneously don't both succeed — isolation prevents one from seeing the other's in-flight change |
+| **Isolation** | concurrent transactions don't see each other's uncommitted changes (how much more they're protected from depends on the isolation level, §3) | T1 debits an account but hasn't committed yet; a concurrent report in T2 doesn't see that half-done debit. ⚠️ **Not** "two people booking the last seat can't both succeed" — see the trap below |
 | **Durability** | once committed, data survives a crash | after the transfer commits and the app gets a success response, a server crash one second later doesn't lose that transfer |
+
+### ⚠️ The "last seat" trap — isolation alone does not prevent double-booking
+
+A very common interview follow-up. Under **Read Committed** (Postgres's and Oracle's default):
+
+```
+T1: SELECT count(*) FROM bookings WHERE seat_id = 7;   -- 0 → seat is free
+T2: SELECT count(*) FROM bookings WHERE seat_id = 7;   -- 0 → seat is free
+T1: INSERT INTO bookings (seat_id, user_id) VALUES (7, 'alice'); COMMIT;
+T2: INSERT INTO bookings (seat_id, user_id) VALUES (7, 'bob');   COMMIT;   -- ✅ also succeeds → double-booked
+```
+
+Neither transaction ever saw the other's *uncommitted* data — isolation was respected — yet both succeeded, because each made a decision from a read that was stale by the time it wrote. That's a check-then-act race, and Read Committed (and even Repeatable Read for the insert case) allows it.
+
+**What actually prevents it** (any one of these):
+- **A unique constraint** — `UNIQUE (seat_id)` on `bookings`: the second insert fails. The strongest fix, since the database enforces it regardless of application logic.
+- **A row lock** — `SELECT ... FROM seats WHERE id = 7 FOR UPDATE` before checking: T2 blocks until T1 commits, then sees the seat is taken.
+- **An atomic conditional update** — `UPDATE seats SET booked_by = 'bob' WHERE id = 7 AND booked_by IS NULL`, then check the affected-row count (same idea as MongoDB's inventory fix in [Part 15 §4](15-mongodb-transactions-and-concurrency.md)).
+- **`SERIALIZABLE` isolation** — the database detects the conflict and aborts one transaction, which the application must retry.
 
 ---
 
@@ -62,7 +81,7 @@ From weakest (fastest, most anomalies possible) to strongest (slowest, fewest an
 | **Repeatable Read** | dirty reads, non-repeatable reads | phantom reads (mostly — MySQL's InnoDB actually prevents most phantoms here too, a known engine-specific deviation from the standard) |
 | **Serializable** | all three | — (transactions behave as if run one at a time) |
 
-**The trade-off:** stronger isolation = more locking/blocking = lower concurrency throughput. Most applications default to **Read Committed** (Postgres, Oracle) or **Repeatable Read** (MySQL/InnoDB) — `Serializable` is reserved for genuinely correctness-critical sections, not used as a blanket default, because of the throughput cost.
+**The trade-off:** stronger isolation = more blocking or more aborted-and-retried transactions = lower concurrency throughput. (Not always locks: Postgres implements `SERIALIZABLE` with Serializable Snapshot Isolation, which doesn't block — it lets transactions run and **aborts** one when it detects a conflict, so the application must be ready to retry.) Most applications default to **Read Committed** (Postgres, Oracle) or **Repeatable Read** (MySQL/InnoDB) — `Serializable` is reserved for genuinely correctness-critical sections, not used as a blanket default, because of the throughput cost.
 
 ---
 
@@ -97,7 +116,10 @@ Transferring 100 from account A to B is **two separate statements** — debit A,
 ## 6. Interview Questions & Answers
 
 **Q: Explain ACID with a concrete example per letter.**
-A: (see the table in §1 — lead with the money-transfer example for Atomicity since it's the one everyone reaches for, but be ready with the seat-booking example for Isolation too).
+A: (see the table in §1 — lead with the money-transfer example for Atomicity since it's the one everyone reaches for. For Isolation, use "a concurrent reader doesn't see a half-done transfer" — **not** the last-seat example, which isolation alone doesn't prevent at the default level; see the trap in §1.)
+
+**Q: Two transactions both read "seat 7 is free" and both insert a booking. Does a transaction prevent the double-booking?**
+A: Not at Read Committed, the Postgres default — neither transaction saw uncommitted data, but both acted on a read that went stale, so both inserts succeed. Fix it with a unique constraint on `seat_id`, a `SELECT ... FOR UPDATE` row lock before the check, an atomic conditional `UPDATE ... WHERE booked_by IS NULL`, or `SERIALIZABLE` isolation with a retry on abort.
 
 **Q: Why would you use a transaction — walk through what breaks without one?**
 A: Any operation that's really multiple writes that need to succeed or fail together — money transfer is the classic case. Without a transaction, a crash between the debit and the credit leaves the system in an impossible state: money gone from one account, never credited to the other, no record of where it went. A transaction guarantees there's no observable in-between state.

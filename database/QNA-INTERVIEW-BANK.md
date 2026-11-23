@@ -91,7 +91,7 @@ Because the CEO's `manager_id` is `NULL` — an `INNER JOIN` would drop the CEO 
 One of three strategies, picked by the optimizer based on table size and available indexes. **Nested loop** — for each row in A, scan B for matches; fine when small or B is indexed on the join column. **Hash join** — build an in-memory hash table on the smaller side's join key, probe it with the larger side; good with no index and enough memory. **Merge join** — both sides pre-sorted on the join key, zippered together.
 
 ### What usually causes a slow join?
-An unindexed join column, which forces the slow nested-loop path scanning an unsorted table. Adding an index on the foreign key column is usually the first fix to reach for — you don't need to reimplement a query planner in an interview, just recognize this pattern.
+Usually a missing index on the join (foreign key) column. With an index, the planner can do a cheap nested loop — one index seek per outer row. Without one, modern planners (Postgres, MySQL 8.0.18+) use a hash join that reads both tables in full and can spill to disk if the hash table doesn't fit in memory. The worst case is an unindexed nested loop (O(n × m)) — old MySQL, or a planner misled by stale statistics. First fix: index the foreign key column (Postgres doesn't create that index automatically), then check the statistics are fresh.
 
 ### What's a CROSS JOIN, and when do you actually see one?
 Every row of table A paired with every row of table B — a full Cartesian product, no `ON` clause. Rare intentionally; usually you see it by accident when someone forgets a join condition, producing a result set of size `rows(A) × rows(B)`.
@@ -117,7 +117,7 @@ A B-Tree node holds many keys per disk page, not just one, so a lookup touches f
 A composite index on `(last_name, first_name)` is sorted by `last_name` first, then `first_name` within each `last_name` group — like a phone book. It can serve a query filtering on `last_name` alone, or `last_name AND first_name` together, but **not** a query filtering on `first_name` alone, since the index isn't independently sorted by that column.
 
 ### Why does composite index field order matter?
-Because the physical sort order is fixed at creation time — first column, then second within it. Put the column with the most selective or most frequently used equality filter first; filtering only on the second column skips the sorted structure entirely and can't use the index at all.
+Because the physical sort order is fixed at creation time — first column, then second within it. Put equality-filtered columns first, then the `ORDER BY` column, then range-filtered columns (the ESR rule) — a range column early breaks the sort order for everything after it. Filtering only on the second column skips the sorted structure entirely and can't use the index at all.
 
 ### What's a covering index?
 One where every column the query needs — both filtered and selected — exists in the index itself, so the database never has to jump back to the actual table row.
@@ -177,7 +177,7 @@ N+1 query patterns (Part 09's populate/N+1), connection pool exhaustion (Part 12
 # 5. ⭐ Transactions & ACID
 
 ### Explain ACID with a concrete example per letter.
-**Atomicity** — transferring money: debit A and credit B either both happen or neither does. **Consistency** — a `CHECK` constraint that balance can't go negative rejects a violating transaction outright rather than partially applying it. **Isolation** — two people booking the last seat simultaneously don't both succeed; one can't see the other's in-flight change. **Durability** — once the transfer commits and the app gets a success response, a crash a second later doesn't lose it.
+**Atomicity** — transferring money: debit A and credit B either both happen or neither does. **Consistency** — a `CHECK` constraint that balance can't go negative rejects a violating transaction outright rather than partially applying it. **Isolation** — a concurrent report doesn't see a transfer that's debited A but not yet credited B. (Don't use "two people booking the last seat can't both succeed" — at Read Committed both *can* succeed; preventing that needs a unique constraint, `SELECT ... FOR UPDATE`, a conditional update, or `SERIALIZABLE`. See [Part 04 §1](04-transactions-and-acid.md).) **Durability** — once the transfer commits and the app gets a success response, a crash a second later doesn't lose it.
 
 ### COMMIT vs ROLLBACK — what do they actually do?
 `COMMIT` makes every change in the transaction permanent and visible to other transactions. `ROLLBACK` discards everything since `BEGIN`, as if none of it happened — this is what makes atomicity enforceable at the application level: catch the error, roll back, and the partial debit never happened.
@@ -257,7 +257,7 @@ db.orders.find().sort({ _id: -1 }).limit(10)  // roughly "10 most recent"
 ```
 
 ### What happens if you forget $set in an update?
-If you pass a plain object instead of wrapping it in `$set`, MongoDB replaces the **entire document** with that object — every field not included is silently dropped. Same footgun shape as forgetting `WHERE` on a SQL `UPDATE`, but worse in effect since it's a full replace, not just a wider blast radius.
+Depends on the layer. The modern MongoDB driver **throws** ("Update document requires atomic operators") for `updateOne`/`updateMany` without operators — full replacement is a separate, explicit `replaceOne`. Mongoose **auto-wraps** a plain object in `$set`, so it merges. The real danger is the legacy `update()` method or a mistaken `replaceOne`: those replace the **entire document**, silently dropping every field not included.
 
 ### find() vs findOne() — what's the actual difference?
 `find()` returns a lazy **cursor** — it doesn't load everything into memory at once. `findOne()` returns a single document directly.
@@ -286,7 +286,7 @@ db.sessions.createIndex({ createdAt: 1 }, { expireAfterSeconds: 3600 })
 ```
 
 ### Does the left-most-prefix rule apply to Mongo compound indexes the same way?
-Identically. An index on `{customerId: 1, status: 1}` is physically sorted by `customerId` first, then `status` within it — serves a query filtering on `customerId` alone or `customerId + status`, but not `status` alone.
+Identically. An index on `{customerId: 1, status: 1}` is physically sorted by `customerId` first, then `status` within it — serves a query filtering on `customerId` alone or `customerId + status`, but not `status` alone. For choosing the order, use **ESR**: Equality fields first, then Sort fields, then Range fields — putting a range field before the sort field forces an in-memory `SORT` stage.
 
 ### What's a covered query in Mongo, and what's the _id gotcha?
 Every field the query needs — filter and projection — exists in the index, so MongoDB never fetches the actual document. The gotcha: `_id` is included in results by default even when not projected explicitly, and if `_id` isn't part of the index, that default inclusion forces a document fetch and breaks coverage — you have to explicitly exclude it with `_id: 0`.

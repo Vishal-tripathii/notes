@@ -37,15 +37,44 @@ Simple to implement, and supports "jump to page 7" directly — the appeal is pu
 
 Instead of a page number, you pass **the last item you saw** and ask for "everything after that":
 
-```sql
-SELECT * FROM posts WHERE created_at < '2024-01-15T10:00:00Z' ORDER BY created_at DESC LIMIT 20;
-```
-
 ```js
+// Unique key — simplest correct cursor
 db.posts.find({ _id: { $lt: lastSeenId } }).sort({ _id: -1 }).limit(20)
 ```
 
-The "cursor" is just the value (usually `_id` or a timestamp) of the last row returned on the previous page, passed back by the client on the next request.
+The "cursor" is the value of the last row returned on the previous page, passed back by the client on the next request.
+
+### ⚠️ The cursor must be unique — add a tie-breaker
+
+A cursor on a **non-unique** column like `created_at` is a real bug. If 5 posts share the timestamp `10:00:00` and the page boundary falls among them:
+
+- `WHERE created_at < '10:00:00'` → **skips** the posts at `10:00:00` that didn't fit on the previous page.
+- `WHERE created_at <= '10:00:00'` → **repeats** the ones that did.
+
+The fix is to sort and cursor on a **compound key that is unique**, with the primary key as the tie-breaker, and back it with a matching index:
+
+```sql
+-- cursor = (last_created_at, last_id) from the previous page
+SELECT * FROM posts
+WHERE (created_at, id) < ('2024-01-15T10:00:00Z', 9812)   -- row-value comparison (Postgres, MySQL)
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+
+CREATE INDEX idx_posts_created_id ON posts (created_at DESC, id DESC);
+```
+
+```js
+// MongoDB has no row-value comparison — spell out the tie-break
+db.posts.find({
+  $or: [
+    { createdAt: { $lt: lastCreatedAt } },
+    { createdAt: lastCreatedAt, _id: { $lt: lastId } }
+  ]
+}).sort({ createdAt: -1, _id: -1 }).limit(20)
+// index: { createdAt: -1, _id: -1 }
+```
+
+Encode the pair into an opaque string (e.g. base64 JSON) before handing it to the client, so the API can change the cursor's contents later without breaking clients.
 
 ---
 
@@ -61,7 +90,7 @@ The "cursor" is just the value (usually `_id` or a timestamp) of the last row re
 <a name="cursor-tradeoff"></a>
 ## 4. Why cursor stays O(1)-ish, and what it gives up
 
-**Why it's fast regardless of depth:** `WHERE created_at < X` (or `_id < X`) is a direct **index seek** — the database jumps straight to that point in the sorted index and reads forward 20 rows, whether that point is row 20 or row 2,000,000 into the dataset. No scanning-and-discarding of everything before it.
+**Why it's fast regardless of depth:** `WHERE _id < X` (or `(created_at, id) < (X, Y)` with a matching index) is a direct **index seek** — the database jumps straight to that point in the sorted index and reads forward 20 rows, whether that point is row 20 or row 2,000,000 into the dataset. No scanning-and-discarding of everything before it.
 
 **Why it's correct under concurrent writes:** the cursor is an actual value from the data ("everything after this specific point"), not a row count — inserts/deletes elsewhere in the dataset don't shift what "after this point" means, so no skipped or duplicated rows across page loads.
 
@@ -89,4 +118,5 @@ A: The ability to jump directly to an arbitrary page number — you can only pag
 - Offset (`SKIP`/`LIMIT`) = simple, supports jump-to-page, but scans-and-discards every row before the offset → O(n) cost that grows with depth, and is incorrect under concurrent inserts/deletes.
 - Cursor (`WHERE x < lastSeenValue`) = index seek regardless of depth → O(1)-ish, and correct under concurrent writes since it tracks an actual value, not a row count.
 - Cursor's trade-off: no "jump to page 7" — sequential paging only.
+- The cursor must be **unique**: sort/cursor on `(created_at, id)`, not `created_at` alone — duplicate timestamps otherwise skip or repeat rows at page boundaries. Back it with a matching compound index.
 - Default to cursor pagination for infinite-scroll/feed UIs; offset is acceptable for small, rarely-changing datasets with a real numbered-pages requirement.

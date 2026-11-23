@@ -60,7 +60,25 @@ db.orders.find({ customerId: "abc", status: "shipped" })       // ✅ uses index
 db.orders.find({ status: "shipped" })                           // ❌ can't use this index
 ```
 
-Put the field with equality filters and higher selectivity first — the same reasoning as SQL, just applied to Mongo's syntax.
+### The ESR rule — Equality, Sort, Range
+
+"Most selective field first" is incomplete. MongoDB's own guidance for compound index order is **ESR**:
+
+1. **E**quality fields first — fields matched exactly (`status: "shipped"`). Order among them barely matters.
+2. **S**ort fields next — fields in the `.sort()`. Because the index is already ordered by them *within* the equality prefix, MongoDB can return results in index order with no sort step.
+3. **R**ange fields last — `$gt`, `$lt`, `$in` over many values, etc.
+
+```js
+// Query: status = "shipped", amount > 100, sorted by newest first
+db.orders.find({ status: "shipped", amount: { $gt: 100 } }).sort({ createdAt: -1 })
+
+db.orders.createIndex({ status: 1, createdAt: -1, amount: 1 })  // ✅ E, S, R — no in-memory sort
+db.orders.createIndex({ status: 1, amount: 1, createdAt: -1 })  // ❌ E, R, S — range before sort
+```
+
+**Why range-before-sort breaks:** once the index scan covers a *range* of `amount` values, the `createdAt` entries across that range are no longer in one sorted run, so MongoDB has to collect every match and sort it in memory — `explain()` shows a `SORT` stage. A blocking sort over 100MB spills to disk (the default since MongoDB 6.0) or fails with a memory-limit error when disk use isn't allowed — slow either way. ESR may scan a few more index keys for the range filter, but it avoids the blocking sort — usually the better trade.
+
+The same reasoning applies to SQL composite indexes ([Part 02 §3](02-sql-indexes.md)): equality columns first, then the `ORDER BY` column, then the range column.
 
 ---
 
@@ -100,7 +118,7 @@ A: Confirm with `.explain()` that it's a `COLLSCAN`, add a single-field index on
 
 - Index types: single-field, compound (left-most-prefix rule applies), text (`$text` search, one per collection), TTL (`expireAfterSeconds`, auto-deletes documents).
 - `.explain()` → `COLLSCAN` = full scan, no index used. Diagnose before assuming.
-- Compound index field order: most selective / most-filtered-on field first.
+- Compound index field order: **ESR** — Equality fields, then Sort fields, then Range fields. Range before sort = in-memory `SORT` stage.
 - Covered query = filter + projected fields all inside the index; exclude `_id` explicitly if it's not indexed.
 - Every index costs write throughput + storage + RAM — index deliberately, not exhaustively.
 - **SQL vs NoSQL:** same B-Tree/left-most-prefix concepts as [SQL indexes (Part 02)](02-sql-indexes.md) — Mongo adds TTL and text indexes with no direct SQL equivalent. Full comparison → [Part 20](20-sql-vs-nosql-comparison.md).

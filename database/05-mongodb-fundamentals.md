@@ -92,7 +92,10 @@ db.users.deleteMany({ status: "inactive" })
 ```
 
 **Key operator distinctions that come up constantly:**
-- `$set` updates only the named fields — it does **not** overwrite the whole document (unlike passing a plain object as the second arg to `updateOne`, which *does* replace the entire document if you forget `$set`).
+- `$set` updates only the named fields — it does **not** overwrite the whole document. What happens if you forget it depends on the layer:
+  - **MongoDB Node driver (v3+) / shell:** `updateOne(filter, { name: "x" })` **throws** — *"Update document requires atomic operators"*. Full replacement is a separate, explicit method: `replaceOne(filter, doc)`.
+  - **Mongoose:** `Model.updateOne(filter, { name: "x" })` **auto-wraps the object in `$set`** — it silently does the right thing (unless you pass `overwrite: true`, or call `replaceOne`).
+  - **The real footgun** is the legacy `update()` / `findAndModify` without operators, and `replaceOne` used by mistake — those genuinely replace the whole document, silently dropping every field not included.
 - `updateOne` vs `updateMany` — same footgun shape as SQL's missing `WHERE` on an `UPDATE`: filter precisely, or you affect more documents than intended.
 - `find()` returns a **cursor** (lazy, doesn't load everything into memory at once) — `findOne()` returns a single document directly.
 
@@ -128,7 +131,7 @@ A: 12 bytes: a 4-byte timestamp (seconds since epoch), a 5-byte random value fix
 A: BSON is binary-encoded and adds types JSON has no native representation for — a real `Date` type, binary data, and distinct numeric types (Int32/Int64/Double/Decimal128) instead of one generic "number." A JS `Date` sent through the driver comes back as a real date object, not a string you have to reparse.
 
 **Q: What happens if you forget `$set` in an update?**
-A: If you pass a plain object (not wrapped in `$set`) as the update document to `updateOne`/`updateMany`, MongoDB replaces the **entire document** with that object instead of merging the named fields — a common and dangerous mistake, since every field not included in the replacement object is silently dropped.
+A: It depends on the layer, and naming that is the strong answer. With the modern MongoDB driver, `updateOne`/`updateMany` with a plain object **throws** ("Update document requires atomic operators") — replacing a document is a separate, explicit `replaceOne`. Mongoose goes the other way and **auto-wraps** a plain object in `$set`, so it merges. The dangerous case is the legacy `update()` method or a mistaken `replaceOne`, which really do replace the entire document and silently drop every field not included.
 
 ---
 
@@ -138,7 +141,7 @@ A: If you pass a plain object (not wrapped in `$set`) as the update document to 
 - **Document** = one record (BSON). **Collection** = group of documents, no enforced schema.
 - **BSON** adds real types JSON can't express: `Date`, `BinData`, distinct numeric types, `ObjectId`.
 - **`ObjectId`** = timestamp (4B) + per-process random (5B) + counter (3B) → roughly sortable by creation time.
-- CRUD: `insertOne`/`insertMany`, `findOne`/`find`, `updateOne`/`updateMany` (always use `$set`), `deleteOne`/`deleteMany`.
+- CRUD: `insertOne`/`insertMany`, `findOne`/`find`, `updateOne`/`updateMany` (always use update operators like `$set` — the driver throws without them, Mongoose auto-wraps; `replaceOne` is the one that replaces the whole document), `deleteOne`/`deleteMany`.
 - `find()` returns a lazy cursor; `findOne()` returns one document directly.
 - Mongo's real trade-off vs relational: no native joins (`$lookup` is the substitute, not equivalent) — data modeling becomes an explicit embed-vs-reference call per relationship.
 - **SQL vs NoSQL:** full point-by-point comparison → [Part 20](20-sql-vs-nosql-comparison.md). Related: [Part 04.5](04.5-foreign-keys-and-cascading.md) — Mongo has no foreign-key/cascade equivalent at all.

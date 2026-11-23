@@ -52,7 +52,7 @@ WHERE last_name = 'Smith' AND first_name = 'A'  -- ✅ uses index
 WHERE first_name = 'A'                          -- ❌ can't use this index at all
 ```
 
-**Field order matters** — put the column used most often (or with the most selective/equality filters) first.
+**Field order matters** — equality-filtered columns first, then the `ORDER BY` column, then range-filtered columns (`>`, `<`, `BETWEEN`). Once the index hits a range condition, the columns after it are no longer in one sorted run, so they can't be used for seeking or for avoiding a sort. This is the same **ESR (Equality, Sort, Range)** rule MongoDB documents — see [Part 06 §3](06-mongodb-indexes.md).
 
 ---
 

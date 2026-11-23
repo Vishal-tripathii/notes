@@ -51,7 +51,7 @@ Say `customers` has 100 rows, but only 80 have ever placed an order.
 - `INNER JOIN customers c ON o.customer_id = c.id` → returns rows only for customers **with at least one order**. Customers with zero orders simply disappear from the result.
 - `LEFT JOIN` (orders as the left table) → returns every order, and if an order's `customer_id` doesn't match anything, the customer columns come back `NULL` rather than dropping the row.
 
-The row-count divergence shows up clearest the other way: `SELECT c.name, o.id FROM customers c LEFT JOIN orders o ON o.id = c.id` returns **all 100 customers** (20 with `NULL` order columns), while the same query with `INNER JOIN` returns only the 80 who ordered something. This is *the* concrete example to have ready — "customers with zero orders" is the canonical case interviewers use to test whether you actually understand the difference versus reciting it.
+The row-count divergence shows up clearest the other way: `SELECT c.name, o.id FROM customers c LEFT JOIN orders o ON o.customer_id = c.id` returns **all 100 customers** (20 with `NULL` order columns), while the same query with `INNER JOIN` returns only the 80 who ordered something. This is *the* concrete example to have ready — "customers with zero orders" is the canonical case interviewers use to test whether you actually understand the difference versus reciting it.
 
 ---
 
@@ -81,7 +81,13 @@ At a high level, the query planner picks one of three strategies per join, based
 | **Hash join** | build an in-memory hash table on the smaller table's join key, then probe it with the larger table | no useful index, both tables large, enough memory |
 | **Merge join** | both inputs sorted on the join key, then merged like a zipper | both sides already sorted (e.g. both have an index on the join column) |
 
-You don't need to reimplement a query planner in an interview — the useful level of understanding is: **an unindexed join column forces a nested loop over an unsorted table, which is the classic "why is this join slow" root cause**, and adding an index on the foreign key column is usually the first fix to reach for.
+You don't need to reimplement a query planner in an interview — the useful level of understanding is:
+
+- **A nested loop is fast *because of* an index** — for each outer row it does an O(log n) index seek into the inner table. That's why the planner picks it when the inner join column is indexed (and the outer side is small).
+- **With no usable index, modern planners don't fall back to a naive nested loop** — Postgres and MySQL 8.0.18+ pick a **hash join** instead (build a hash table on the smaller side, probe with the larger). That's O(n + m), but it reads both tables fully and needs memory; if the hash table doesn't fit in `work_mem` / `join_buffer_size`, it spills to disk and gets slow.
+- **The genuinely slow case** is a nested loop *without* an index on the inner side (O(n × m)) — what older MySQL (pre-8.0.18, "block nested loop") did, and what any planner can still choose when **stale statistics** make it think the outer side has only a few rows when it actually has millions.
+
+So the practical fix is still the same — **index the foreign key column** (Postgres does *not* create one for you automatically, only for the referenced primary key) — but the reason is "it makes a cheap nested-loop seek possible and stops the planner scanning both tables in full," not "no index forces a nested loop."
 
 ---
 
@@ -95,7 +101,7 @@ A: Customers table with rows that have never placed an order. `INNER JOIN` again
 A: When rows relate to other rows in the same table — employee-to-manager is the standard example. Two aliases of the same table, joined on a foreign-key-like column (`manager_id` → `id`).
 
 **Q: At a high level, how does the database actually execute a join?**
-A: One of three strategies: nested loop (scan B per row of A — fine if small or indexed), hash join (build a hash table on the smaller side, probe with the larger — good with no index and enough memory), or merge join (both sides pre-sorted, zippered together). The practical takeaway: an unindexed join column tends to force the slow nested-loop path over an unsorted table.
+A: One of three strategies: nested loop (scan B per row of A — fine if small or indexed), hash join (build a hash table on the smaller side, probe with the larger — good with no index and enough memory), or merge join (both sides pre-sorted, zippered together). The practical takeaway: an index on the join column makes a cheap nested-loop seek possible; without one, modern planners use a hash join, which scans both tables fully and can spill to disk. The truly slow case is an unindexed nested loop (O(n × m)) — older MySQL, or a planner misled by stale statistics.
 
 ---
 
@@ -105,5 +111,5 @@ A: One of three strategies: nested loop (scan B per row of A — fine if small o
 - `INNER JOIN` = only matching rows on both sides. `LEFT JOIN` = all left rows, unmatched right columns become `NULL`.
 - Canonical "row count differs" case: customers with zero orders — `INNER` drops them, `LEFT` keeps them as `NULL`-filled rows.
 - `SELF JOIN` = same table, two aliases — classic case: employee → manager.
-- Join execution: nested loop (small/indexed), hash join (large, unindexed, in-memory), merge join (both pre-sorted). Unindexed join column → slow nested loop is the usual root cause of a slow join.
+- Join execution: nested loop (small outer side + indexed inner side), hash join (no useful index, large inputs, needs memory), merge join (both pre-sorted). No index on the join column → full scans + hash join that can spill to disk; an *unindexed nested loop* (O(n × m), old MySQL or stale stats) is the worst case. Fix: index the foreign key column — Postgres doesn't create it for you.
 - **SQL vs NoSQL:** joins are native and optimizer-tuned in SQL — Mongo's closest equivalents (`$lookup`, `populate()`) are neither as first-class nor as optimized. Full comparison → [Part 20](20-sql-vs-nosql-comparison.md).
