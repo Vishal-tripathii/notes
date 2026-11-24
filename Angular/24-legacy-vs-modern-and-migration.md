@@ -107,7 +107,18 @@ Useful for placing any codebase you're shown:
                             standalone by default, zoneless, SSR rework
 ```
 
-If you're asked "which version introduced signals", the answer is **16** (developer preview), stabilising afterwards. Control flow blocks and `@defer` arrived in **17**.
+**The signals era, version by version** (a new major every ~6 months — check the docs for anything after 21):
+
+| Version | Released | Headline changes |
+|---|---|---|
+| **16** | May 2023 | signals (developer preview), `takeUntilDestroyed`, `DestroyRef`, required inputs, non-destructive hydration (preview) |
+| **17** | Nov 2023 | `@if`/`@for`/`@switch`, `@defer`, new esbuild/Vite builder default, `ng new` standalone by default, new angular.dev docs; 17.1–17.3: signal `input()`, `model()`, signal queries, `output()` |
+| **18** | May 2024 | zoneless (experimental), `@let` (18.1), Material 3, event replay |
+| **19** | Nov 2024 | **`standalone: true` is the default** in the decorator, `linkedSignal`, `resource()` (experimental), incremental hydration (preview), route-level render modes, `provideAppInitializer` |
+| **20** | May 2025 | `effect`, `linkedSignal`, `toSignal` and signal inputs/queries **stable**; zoneless stable (20.2); `httpResource`; `resource` option renamed `request` → `params`; **`*ngIf`/`*ngFor`/`*ngSwitch` deprecated**; `@angular/animations` deprecated (20.2) in favour of `animate.enter`/`animate.leave` |
+| **21** | Nov 2025 | **zoneless by default** for new apps, **Vitest** default test runner, **Signal Forms** (experimental), Angular Aria (developer preview), MCP server for AI tools |
+
+If you're asked "which version introduced signals", the answer is **16** (developer preview), with the core APIs stable by **20**. Control flow blocks and `@defer` arrived in **17**.
 
 ---
 
@@ -146,13 +157,18 @@ ng generate @angular/core:control-flow        # *ngIf → @if across the codebas
 # 6. Deprecated vs removed vs unfashionable
 
 ```
-REMOVED          ViewEngine · ngcc · toPromise() · Angular Universal package
-DEPRECATED       ::ng-deep · class-based guards
-STILL SUPPORTED  NgModules · *ngIf · @Input/@Output · constructor injection
-                 ← not going anywhere. Don't call these "wrong" in an interview.
+REMOVED          ViewEngine · ngcc · Angular Universal packages (@nguniversal → @angular/ssr)
+DEPRECATED       *ngIf / *ngFor / *ngSwitch (v20 → use @if/@for/@switch; still work for now)
+                 @angular/animations (v20.2 → animate.enter/leave + CSS)
+                 ::ng-deep · RxJS toPromise() (deprecated in RxJS 7, not removed yet → firstValueFrom)
+                 CanLoad (→ canMatch)
+STILL SUPPORTED  NgModules · @Input/@Output · constructor injection · class-based guards
+                 ← not deprecated. Don't call these "wrong" in an interview.
 ```
 
-That last line matters. Calling NgModules obsolete in front of someone maintaining a large module-based app reads as inexperience. They're supported; standalone is preferred for new code.
+That last group matters. Calling NgModules obsolete in front of someone maintaining a large module-based app reads as inexperience. They're supported; standalone is preferred for new code. (Class-based guards: functional guards are the recommended style, and a deprecation of the class interfaces was announced in v15.2 but then **reverted** — verify against your version's docs if asked.)
+
+**Deprecated ≠ removed.** Deprecated APIs keep working, usually for at least two more majors, with a migration schematic. `*ngIf` code still runs — but new code should use `@if`, and `ng generate @angular/core:control-flow` converts it.
 
 ---
 

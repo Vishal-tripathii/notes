@@ -43,40 +43,48 @@ The problem stated plainly: you have a signal (`userId`), and you want a fetch t
 userId = signal(1);
 
 userResource = resource({
-  request: () => ({ id: this.userId() }),   // tracked like a computed's deps
-  loader: async ({ request, abortSignal }) => {
-    const res = await fetch(`/api/users/${request.id}`, { signal: abortSignal });
+  params: () => ({ id: this.userId() }),        // tracked like a computed's deps
+  loader: async ({ params, abortSignal }) => {
+    const res = await fetch(`/api/users/${params.id}`, { signal: abortSignal });
     return res.json();
   },
 });
 ```
 
+> ⚠️ **API rename in Angular 20:** this option used to be called **`request`** (and the loader received `{ request }`). Since v20 it's **`params`** / `{ params }`. Older articles and codebases on v19 use the old name — same idea. If `params` returns `undefined`, the resource stays `idle` and doesn't load (handy for "no id selected yet").
+
 `resource()` gives you back an object of signals, not a promise:
 
 ```ts
 userResource.value()      // the data, or undefined before it resolves
-userResource.status()     // 'idle' | 'loading' | 'reloading' | 'resolved' | 'error'
+userResource.hasValue()   // true once there's a value (use it before reading value() safely)
+userResource.status()     // 'idle' | 'loading' | 'reloading' | 'resolved' | 'error' | 'local'
 userResource.error()      // the error, if any
 userResource.isLoading()  // convenience boolean
 userResource.reload()     // re-run the loader on demand
+userResource.value.set(x) // set a value locally (status becomes 'local') — e.g. optimistic update
 ```
 
-**How it works:** the `request` function is read like a `computed()`'s dependencies — any signal read inside it becomes a trigger. When one changes, Angular reruns `loader` automatically, and cancels the in-flight one via `abortSignal` — the same job `switchMap` does in RxJS, but built in.
+**How it works:** the `params` function is read like a `computed()`'s dependencies — any signal read inside it becomes a trigger. When one changes, Angular reruns `loader` automatically, and cancels the in-flight one via `abortSignal` — the same job `switchMap` does in RxJS, but built in.
 
 **`httpResource()`** — a thinner wrapper specifically for `HttpClient`, since writing `fetch` by hand is rarely what you want in Angular:
 
 ```ts
 user = httpResource<User>(() => `/api/users/${this.userId()}`);
+// goes through HttpClient → your interceptors still run ✅
+// also exposes user.headers(), user.statusCode(), user.progress()
 ```
 
-**`rxResource()`** — for when the loader is naturally an Observable instead of a Promise (reusing an existing service method that returns one):
+**`rxResource()`** — for when the loader is naturally an Observable instead of a Promise (reusing an existing service method that returns one). Since Angular 20 its loader option is called **`stream`** (it was `loader` before):
 
 ```ts
 user = rxResource({
-  request: () => ({ id: this.userId() }),
-  loader: ({ request }) => this.userService.getById(request.id),   // returns Observable
+  params: () => ({ id: this.userId() }),
+  stream: ({ params }) => this.userService.getById(params.id),   // returns Observable
 });
 ```
+
+> 🧠 **Remember:** `params` = **what** to load (signals in), `loader`/`stream` = **how** to load it. Change a signal in `params` → the old request is cancelled and a new one starts.
 
 ⚠️ This does **not** replace RxJS. It replaces the specific pattern of "signal in, HTTP call out, track loading/error by hand." Debounced search, WebSocket streams, polling — that's still RxJS territory (see [Part 12](12-rxjs.md)), because `resource()` reacts to a signal changing, it doesn't operate on a stream of events over time.
 
@@ -129,7 +137,19 @@ With this, Zone.js is removed from the bundle entirely — no monkey-patched `se
 
 **What this demands of your code:** anything that mutates state *outside* Angular's knowledge — a third-party library's callback, a raw DOM event listener attached manually — won't trigger a view update on its own anymore, because there's no Zone.js patch making that automatic. You need the state involved to be a signal (whose write itself notifies the view) or to call the update mechanism explicitly.
 
-⚠️ This started as `provideExperimentalZonelessChangeDetection()` and was renamed once stabilized — if you see the experimental name in an older codebase or article, it's the same feature, pre-stabilization.
+⚠️ This started as `provideExperimentalZonelessChangeDetection()` (v18–19) and was renamed once stabilized — if you see the experimental name in an older codebase or article, it's the same feature, pre-stabilization.
+
+**Status by version:** experimental in **v18**, developer preview in **v20.0**, **stable in v20.2**, and **the default for new projects in v21** (`ng new` no longer adds `zone.js`). Existing apps keep Zone.js until you migrate.
+
+**What triggers change detection without Zone.js:** a signal read in a template changing, `markForCheck()` (which the `async` pipe calls), a template event listener (`(click)`), `ComponentRef.setInput()`, and attaching/detaching views. Things that **don't** anymore: a `setTimeout` or a raw `addEventListener` callback that just sets a plain field.
+
+```ts
+// zoneless: this won't update the view…
+setTimeout(() => this.message = 'Done', 1000);
+// …this will
+message = signal('');
+setTimeout(() => this.message.set('Done'), 1000);
+```
 
 ---
 
@@ -162,7 +182,9 @@ The Angular CLI's newer **application builder** replaced the old webpack-based b
 <a name="vitest"></a>
 # 8. Vitest — the new test runner story
 
-Karma (the CLI's long-time default unit test runner) runs tests in a real browser via a browser launcher, which is slow to start and heavier to run in CI. The CLI added **Vitest** as an alternative unit-test builder — it runs in Node (or a lightweight browser-like environment) instead of spinning up an actual browser, which is the source of the speed difference.
+Karma (the CLI's long-time default unit test runner) runs tests in a real browser via a browser launcher, which is slow to start and heavier to run in CI. The CLI added **Vitest** as a unit-test builder — it runs in Node with a simulated DOM (jsdom/happy-dom), or optionally in a real browser via Playwright, which is the source of the speed difference.
+
+**Status:** experimental in v20, and **the default test runner for new projects since v21**. Karma is no longer actively developed upstream; existing projects can keep it or migrate with a schematic. (Many teams also use **Jest** via community builders — see [Part 20](20-testing.md).)
 
 **What doesn't change:** `TestBed`, `ComponentFixture`, `HttpTestingController` — everything from [Part 20](20-testing.md) — work the same regardless of which runner executes them. This is a **runner** swap, not a rewrite of how Angular tests are written.
 
@@ -188,7 +210,23 @@ No behavioural difference — purely a compiler-level syntax allowance, useful m
 <a name="signal-forms"></a>
 # 10. Signal Forms — experimental, don't over-invest
 
-The Angular team has an in-progress, signals-based alternative to Reactive/Template-driven forms ([Part 15](15-forms.md)) — the idea being form state and validation expressed as signals/`computed()` instead of `FormControl`/`FormGroup` observables. As of my knowledge, this was still **experimental** and not the recommended default. Know that it exists and roughly what problem it targets (unifying form state with the rest of a signals-based component, rather than a separate reactive-forms API surface) — don't spend real prep time memorising an API surface that was still moving. If a JD or interviewer references it, that's a strong sign to ask directly which Angular version/API they mean rather than guessing.
+A signals-based alternative to Reactive/Template-driven forms ([Part 15](15-forms.md)) — **shipped as experimental in Angular 21**, in `@angular/forms/signals`. The idea: your form *is* a signal of your data model, and validation is declared as a schema.
+
+```ts
+import { form, required, email } from '@angular/forms/signals';
+
+login = signal({ email: '', password: '' });        // the model — a plain signal
+loginForm = form(this.login, (f) => {               // the form wraps the model
+  required(f.email); email(f.email);
+  required(f.password);
+});
+// template binds fields with a directive, e.g. <input [field]="loginForm.email" />
+// state is signals: loginForm.email().valid(), loginForm().invalid() ...
+```
+
+What problem it targets: no separate `FormControl` tree to keep in sync with your model, no `valueChanges` Observables — form state works with `computed()` like the rest of a signals-based component.
+
+**Still experimental** — the API (including the binding directive's name) may change between versions. Know that it exists and what it's for; Reactive Forms remain the production default. If a JD mentions it, ask which Angular version they're on.
 
 ---
 
@@ -198,11 +236,14 @@ The Angular team has an in-progress, signals-based alternative to Reactive/Templ
 ### Q: What problem does `resource()` solve that `effect()` + `HttpClient` didn't already handle?
 `effect()` can call `HttpClient` when a signal changes, but you'd hand-write the loading/error state and the cancellation of a stale in-flight request yourself. `resource()` gives you all of that as signals out of the box — `value()`, `status()`, `error()`, `isLoading()` — and cancels the previous load automatically when its `request` signal changes again.
 
-### Q: `resource()` vs `rxResource()` — when would you pick one over the other?
-Same idea, different loader shape. `resource()`'s loader returns a Promise; `rxResource()`'s returns an Observable. If you already have a service method returning an Observable (most Angular services do, from HttpClient), `rxResource()` avoids converting it — otherwise plain `resource()` is simpler.
+### Q: `resource()` vs `rxResource()` vs `httpResource()` — when would you pick each?
+Same idea, different loader shape. `resource()`'s loader returns a Promise; `rxResource()`'s `stream` returns an Observable — use it to reuse an existing service method. `httpResource()` takes a URL (or request object) function and goes through `HttpClient`, so interceptors still apply — the most common choice for plain GETs in an Angular app.
 
 ### Q: How does `resource()` know when to re-run its loader?
-The same dependency-tracking signals already use: its `request` function is read like a `computed()`, so any signal called inside it registers as a dependency. When one of those signals changes, the loader reruns automatically — no manual subscription or effect needed.
+The same dependency-tracking signals already use: its `params` function (called `request` before Angular 20) is read like a `computed()`, so any signal called inside it registers as a dependency. When one of those signals changes, the in-flight load is aborted and the loader reruns automatically. If `params` returns `undefined`, the resource stays idle.
+
+### Q: Is zoneless the default now?
+For **new** projects, yes — since Angular 21, `ng new` creates a zoneless app. It became stable in 20.2. Existing apps keep Zone.js until migrated. Without Zone.js, updates come from signals, template events, `markForCheck`/`async` pipe — not from any finished `setTimeout` or promise.
 
 ### Q: What does `provideZonelessChangeDetection()` actually remove, and what does that cost you?
 It removes Zone.js — no more monkey-patched async APIs triggering an automatic "check everything" pass. The cost: state changes that happen outside Angular's knowledge (a raw addEventListener callback, a third-party library's internal state) no longer trigger a view update automatically. That state needs to be a signal, or you call the update path explicitly.

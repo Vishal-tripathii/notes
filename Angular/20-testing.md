@@ -16,6 +16,10 @@
 4. [Testing a component](#component)
 5. [Mocking dependencies](#mocking) ⭐
 6. [Async testing](#async)
+   - [6.1 Test runners — Karma, Vitest, Jest](#runners) ⭐
+   - [6.2 Testing signal inputs, OnPush and zoneless](#signals-testing) ⭐
+   - [6.3 Component harnesses](#harness)
+   - [6.4 End-to-end — Playwright / Cypress](#e2e)
 7. [Interview Q&A](#interview)
 8. [The 60-second summary](#summary)
 
@@ -215,6 +219,118 @@ Observables from `of()` are synchronous, so most component tests need neither.
 
 ---
 
+<a name="runners"></a>
+# 6.1 ⭐ Test runners — Karma, Vitest, Jest
+
+| Runner | Where tests run | Status |
+|---|---|---|
+| **Karma + Jasmine** | a real browser (Chrome) | the old CLI default; Karma is no longer actively developed upstream |
+| **Vitest** | Node with a simulated DOM (jsdom/happy-dom), or a real browser via Playwright | **default for new projects since Angular 21** (`ng test` uses the `@angular/build:unit-test` builder) |
+| **Jest** | Node with jsdom | very common in existing enterprise apps, via community builders (e.g. `jest-preset-angular`) |
+
+The Angular testing APIs — `TestBed`, `ComponentFixture`, `HttpTestingController` — are the **same in all three**. The differences are speed, the mocking API (`jasmine.createSpyObj` vs `vi.fn()` / `jest.fn()`), and whether you get a real browser.
+
+```ts
+// Jasmine
+const api = jasmine.createSpyObj<EmployeeApi>('EmployeeApi', ['getAll']);
+api.getAll.and.returnValue(of([]));
+
+// Vitest (Jest is the same with jest.fn)
+const api = { getAll: vi.fn().mockReturnValue(of([])) };
+```
+
+`fakeAsync`/`tick` rely on Zone.js. In a **zoneless** project, use the runner's fake timers (`vi.useFakeTimers()` + `vi.advanceTimersByTime()`) and `await fixture.whenStable()` instead.
+
+---
+
+<a name="signals-testing"></a>
+# 6.2 ⭐ Testing signal inputs, OnPush and zoneless components
+
+**Set signal inputs with `setInput`** — you can't assign to `input()` signals directly:
+
+```ts
+const fixture = TestBed.createComponent(EmployeeCardComponent);
+fixture.componentRef.setInput('employee', { id: 1, name: 'Asha', role: 'Dev' });
+fixture.detectChanges();                        // or: await fixture.whenStable()
+expect(fixture.nativeElement.textContent).toContain('Asha (Dev)');
+```
+
+`setInput` also works for OnPush components — it marks the component for checking, exactly like a parent binding would. (Setting `component.someField = x` on an OnPush component and calling `detectChanges()` often does **nothing**, which is the classic "my OnPush test doesn't update" confusion.)
+
+**Prefer `await fixture.whenStable()`** over manual `detectChanges()` in modern tests — it waits until Angular has finished rendering, which is also how zoneless apps update:
+
+```ts
+TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+// ...
+component.count.set(5);
+await fixture.whenStable();
+expect(el.textContent).toContain('5');
+```
+
+**Testing a plain signal or `computed`** needs nothing special — they're synchronous:
+
+```ts
+const cart = TestBed.inject(CartService);
+cart.add(book);
+expect(cart.total()).toBe(10);
+```
+
+**Testing an `effect`:** effects are scheduled, so flush them with `TestBed.tick()` (v20+; it was `TestBed.flushEffects()` in v17–19) before asserting.
+
+**Testing `httpResource` / HTTP:** same `HttpTestingController` as §3 — the resource's request is expected and flushed like any other, then `await fixture.whenStable()`.
+
+---
+
+<a name="harness"></a>
+# 6.3 Component harnesses (Angular CDK)
+
+Querying a Material component's DOM (`.mat-mdc-select-trigger`…) breaks every time Material changes its markup. **Harnesses** give you a stable, high-level API instead:
+
+```ts
+import { TestbedHarnessEnvironment } from '@angular/cdk/testing/testbed';
+import { MatSelectHarness } from '@angular/material/select/testing';
+
+const loader = TestbedHarnessEnvironment.loader(fixture);
+const select = await loader.getHarness(MatSelectHarness.with({ selector: '#role' }));
+await select.open();
+await select.clickOptions({ text: 'Admin' });
+expect(await select.getValueText()).toBe('Admin');
+```
+
+- Harnesses **wait for Angular automatically** — no `detectChanges()` sprinkling.
+- The same harness works in unit tests and in E2E-style environments.
+- You can write your own (`ComponentHarness`) for your design-system components so their tests survive markup changes.
+
+---
+
+<a name="e2e"></a>
+# 6.4 End-to-end tests — Playwright / Cypress
+
+Unit and component tests check pieces. **E2E tests** drive the real app in a real browser, the way a user does — login, add to cart, check out.
+
+| | Playwright | Cypress |
+|---|---|---|
+| Browsers | Chromium, Firefox, WebKit (Safari engine) | Chromium-family, Firefox; WebKit experimental |
+| Style | async/await, auto-waiting | chained commands, great interactive runner |
+| Parallel / multi-tab | built in | paid dashboard / workarounds |
+
+(Protractor, the old Angular E2E tool, is **deprecated and gone** — if a codebase still has it, that's a migration item.)
+
+```ts
+// Playwright
+test('user can log in', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('asha@example.com');
+  await page.getByLabel('Password').fill('secret');
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await expect(page.getByText('Welcome, Asha')).toBeVisible();
+});
+```
+
+Select elements by **role, label or text** (what users see) or a dedicated `data-testid` — never by CSS classes that designers change. Keep E2E tests **few and focused on critical flows**; they're slow and the most likely to be flaky. The general testing principles (pyramid, mocking, flaky tests) are the same as in [nodejs Part 10](../nodejs/10-testing.md).
+
+---
+
 <a name="interview"></a>
 # 7. Interview Q&A
 
@@ -233,6 +349,22 @@ With `HttpTestingController`. I subscribe to the service method, assert the expe
 ### Q: Why does my DOM assertion fail?
 
 Almost always a missing `fixture.detectChanges()`. Creating the component doesn't render it — change detection has to run before the template exists.
+
+### Q: How do you set a signal input in a test?
+
+`fixture.componentRef.setInput('name', value)` — signal inputs are read-only from outside, and `setInput` also marks OnPush components for checking, just like a real parent binding. Then `await fixture.whenStable()` (or `detectChanges()`) and assert on the DOM.
+
+### Q: Karma, Jest or Vitest?
+
+All three run the same `TestBed` tests. Karma uses a real browser and was the old default; Vitest is the default for new projects since Angular 21 and runs fast in Node with a simulated DOM (or a real browser via Playwright); Jest is common in existing apps. The practical differences are speed and the mocking API.
+
+### Q: What are component harnesses for?
+
+A stable testing API for components — especially Angular Material — so tests call `select.clickOptions({ text: 'Admin' })` instead of querying internal CSS classes that change between versions. Harnesses also wait for Angular to stabilise automatically.
+
+### Q: Unit, component and E2E tests — what goes where?
+
+Business logic and pure functions in fast unit tests; each component's behaviour with `TestBed` and mocked services; a few critical user journeys with Playwright or Cypress against the real app. Most tests at the bottom, few at the top.
 
 ### Q: What do you not test?
 

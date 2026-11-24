@@ -269,6 +269,51 @@ It was optional in `*ngFor`, so almost nobody used it, and lists silently rebuil
 
 Use `track item.id` when you have an id. `track $index` only when items have no stable identity.
 
+### The built-in `@for` variables
+
+Inside `@for` you get these for free — no `let i = index` boilerplate:
+
+| Variable | Means |
+|---|---|
+| `$index` | position, starting at 0 |
+| `$count` | total number of items |
+| `$first` / `$last` | is this the first / last item? |
+| `$even` / `$odd` | is the index even / odd? (striped rows) |
+
+```html
+@for (user of users(); track user.id; let i = $index, last = $last) {
+  <li [class.striped]="$even">
+    {{ i + 1 }}. {{ user.name }} @if (!last) { , }
+  </li>
+} @empty {
+  <li>No users yet</li>
+}
+```
+
+`let i = $index` is only needed if you want a different name (useful in nested loops, where the inner `$index` hides the outer one).
+
+### `@if` with `as`, and `@else if`
+
+```html
+@if (user(); as u) {             <!-- u is the non-null value -->
+  <p>Hi {{ u.name }}</p>
+} @else if (loading()) {
+  <spinner />
+} @else {
+  <a routerLink="/login">Log in</a>
+}
+```
+
+### ⚠️ `*ngIf` / `*ngFor` / `*ngSwitch` are deprecated (Angular 20)
+
+They still work, but the built-in blocks are the replacement and the old directives are scheduled for removal in a future major. Convert automatically:
+
+```bash
+ng generate @angular/core:control-flow
+```
+
+> 🧠 **Remember:** **`@for` needs `track`; `$index`, `$first`, `$last`, `$even`, `$odd`, `$count` come free; `@empty` handles the empty list.**
+
 ---
 
 <a name="defer"></a>
@@ -288,7 +333,26 @@ The same block syntax gives you deferred loading:
 
 The chart's JavaScript isn't in the initial bundle at all. It downloads when the placeholder scrolls into view.
 
-Triggers include `on viewport`, `on interaction`, `on hover`, `on idle`, `on timer(2s)`, and `when <condition>`.
+Triggers include `on viewport`, `on interaction`, `on hover`, `on idle` (the default), `on immediate`, `on timer(2s)`, and `when <condition>`.
+
+The full set of blocks and options:
+
+```html
+@defer (on interaction; prefetch on idle) {     <!-- download early when idle, SHOW on click -->
+  <app-comments [postId]="id()" />
+} @placeholder (minimum 300ms) {                <!-- shown before loading starts; min time avoids flicker -->
+  <button>Show comments</button>
+} @loading (after 100ms; minimum 500ms) {       <!-- only show spinner if loading takes >100ms -->
+  <spinner />
+} @error {
+  <p>Couldn't load comments.</p>
+}
+```
+
+Rules that trip people up:
+- **Only standalone components/directives/pipes used *only* inside the `@defer` block are split out.** If the same component is also used outside the block (or imported eagerly elsewhere), it stays in the main bundle.
+- **`@placeholder` content is NOT deferred** — keep it light.
+- With SSR, `@defer` blocks render their **placeholder** on the server, unless you use **incremental hydration** — `@defer (hydrate on viewport)` — which renders the real content on the server and only *hydrates* it later ([Part 21 §2](21-ssr-and-hydration.md)).
 
 Before this, lazy loading was a routing concern — you could only split at route boundaries. Now you can split *inside* a page. More in [Part 18](18-performance.md).
 

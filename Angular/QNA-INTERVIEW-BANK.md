@@ -2,7 +2,7 @@
 
 > **How to use:** cover the answer, say yours out loud, then compare — speaking still finds gaps that reading hides. But unlike its terse siblings, this bank is written to work as a **standalone crash course**: every answer opens with a plain definition, then the tradeoff/reasoning behind it, then a short code snippet wherever the concept has real shape in code. If someone has time for exactly one file before an interview and never opens the rest of the `Angular/` notes folder, this is the one that gets them ready.
 >
-> **~220 questions · 22 sections**
+> **~250 questions · 31 sections** (sections 23–31 and new signal questions were added in the gap review; answers updated to Angular 21 — check the docs for newer versions).
 
 ---
 
@@ -32,6 +32,15 @@
 | 20 | [Testing](#s20) | [Part 20](20-testing.md) |
 | 21 | [Latest Angular Features](#s21) | [Part 27](27-latest-angular-features.md) |
 | 22 | [Scenario & Debugging](#s22) ⭐ | — |
+| 23 | [Versions & What's Deprecated](#s23) ⭐ | [Part 24](24-legacy-vs-modern-and-migration.md) |
+| 24 | [Control Flow & Templates — details](#s24) | [Part 03](03-templates-and-data-binding.md), [04](04-directives.md) |
+| 25 | [Animations](#s25) | [Part 28](28-animations.md) |
+| 26 | [Angular Material & CDK](#s26) | [Part 29](29-angular-material-and-cdk.md) |
+| 27 | [Accessibility & i18n](#s27) ⭐ | [Part 30](30-accessibility-and-i18n.md) |
+| 28 | [Configuration, Startup & Deployment](#s28) ⭐ | [Part 31](31-configuration-and-app-startup.md) |
+| 29 | [Scaling — Nx, Micro-Frontends, Elements](#s29) ⭐ | [Part 32](32-scaling-nx-microfrontends-elements.md) |
+| 30 | [Testing — modern bits](#s30) | [Part 20](20-testing.md) |
+| 31 | [SSR — modern bits](#s31) | [Part 21](21-ssr-and-hydration.md) |
 
 ---
 
@@ -301,7 +310,7 @@ Checks the component on every cycle, regardless of whether anything relevant cha
 ### What does `ChangeDetectionStrategy.OnPush` actually do?
 An opt-in strategy that tells Angular to skip a component unless it has good reason to check it.
 
-Skips the component unless one of four things happens: an input reference changes, an event fires from the component or its children, `markForCheck()` is called, or an async pipe in its template emits. Skipping a component skips its whole subtree — that's where the saving comes from.
+Skips the component unless one of five things happens: an input reference changes, an event fires from the component or its children, `markForCheck()` is called, an async pipe in its template emits, or — since Angular 17 — **a signal read in its template changes** (which refreshes just that component). Skipping a component skips its whole subtree — that's where the saving comes from. "OnPush + signals" is today's recommended default.
 
 ```ts
 @Component({ changeDetection: ChangeDetectionStrategy.OnPush })
@@ -447,6 +456,24 @@ query$ = toObservable(this.searchTerm);
 ```
 
 ---
+
+### `computed` vs `linkedSignal`?
+Both are derived from other signals. `computed` is **read-only**. `linkedSignal` (v19, stable v20) is **writable** — it recalculates whenever its source changes, but you can `set` it in between.
+
+Classic use: "selected option should reset to the first item when the list of options changes, but the user can pick another one."
+
+```ts
+selected = linkedSignal(() => this.options()[0]);
+pick(o: string) { this.selected.set(o); }
+```
+
+### When does an `effect` run — and what is `untracked` for?
+An effect runs **at least once, but not synchronously** at creation — Angular schedules it and runs it during change detection (component effects just before that component is checked). Several signal changes in a row cause **one** run with the latest values.
+
+`untracked(() => this.theme())` reads a signal **without** making it a dependency, so changes to it don't re-run the effect or computed. (`allowSignalWrites` no longer exists since v19.)
+
+### What do `toSignal`'s options do?
+`toSignal(obs$)` returns `Signal<T | undefined>` — `undefined` until the first emission. `{ initialValue: x }` gives a starting value; `{ requireSync: true }` asserts the Observable emits synchronously (like a `BehaviorSubject`), so there's no `undefined`. It subscribes immediately and unsubscribes when the component is destroyed; if the stream errors, reading the signal throws — so `catchError` in the stream.
 
 <a name="s5"></a>
 # 5. Dependency Injection
@@ -1673,28 +1700,29 @@ Private methods, Angular's own behaviour, and other implementation details — t
 ### What problem does `resource()` solve that `effect()` + `HttpClient` didn't?
 `resource()` is a signal-driven wrapper for async data — a fetch that reruns automatically when its input signal changes, exposing loading/error/value as signals.
 
-`effect()` can call `HttpClient` when a signal changes, but loading state, error state, and cancelling a stale in-flight request all had to be hand-wired. `resource()` gives you `value()`, `status()`, `error()`, and `isLoading()` as signals out of the box, and cancels the previous load automatically when its `request` signal changes.
+`effect()` can call `HttpClient` when a signal changes, but loading state, error state, and cancelling a stale in-flight request all had to be hand-wired. `resource()` gives you `value()`, `hasValue()`, `status()`, `error()`, and `isLoading()` as signals out of the box, and cancels the previous load automatically when its `params` change.
 
 ```ts
 userResource = resource({
-  request: () => ({ id: this.userId() }),
-  loader: async ({ request }) => (await fetch(`/api/users/${request.id}`)).json(),
+  params: () => ({ id: this.userId() }),          // was `request` before Angular 20
+  loader: async ({ params, abortSignal }) =>
+    (await fetch(`/api/users/${params.id}`, { signal: abortSignal })).json(),
 });
 ```
 
 ### `resource()` vs `rxResource()` vs `httpResource()`?
 Three variants of the same idea, differing only in the shape their loader returns.
 
-`resource()`'s loader returns a Promise. `rxResource()`'s returns an Observable — useful when a service already returns one. `httpResource()` is a thin wrapper specifically for an `HttpClient` GET, when you just need a URL derived from a signal.
+`resource()`'s loader returns a Promise. `rxResource()` takes a **`stream`** function returning an Observable (the option was called `loader` before v20) — useful when a service already returns one. `httpResource()` takes a URL function and goes through `HttpClient`, so interceptors still apply — the usual choice for a GET driven by a signal.
 
 ```ts
 user = httpResource<User>(() => `/api/users/${this.userId()}`);
 ```
 
 ### How does `resource()` know when to re-fetch?
-Its `request` function is tracked exactly like a `computed()`'s dependencies.
+Its `params` function (named `request` before Angular 20) is tracked exactly like a `computed()`'s dependencies.
 
-Any signal called inside it registers as a dependency. When one changes, the loader reruns automatically — the same dependency-tracking signals already use.
+Any signal called inside it registers as a dependency. When one changes, the in-flight load is aborted and the loader reruns automatically. If `params` returns `undefined`, the resource stays idle.
 
 ### What does `provideZonelessChangeDetection()` remove, and what does that cost you?
 The production API that drops Zone.js from the bundle entirely, relying on signals to drive change detection precisely.
@@ -1704,6 +1732,8 @@ Async APIs are no longer monkey-patched to trigger an automatic "check everythin
 ```ts
 bootstrapApplication(AppComponent, { providers: [provideZonelessChangeDetection()] });
 ```
+
+Status: experimental in v18, stable in v20.2, and **the default for new projects since v21**.
 
 ### What is hydration event replay for?
 It captures clicks that land in the gap between a server-rendered page appearing and Angular finishing hydration, then replays them once real listeners attach.
@@ -1722,7 +1752,7 @@ esbuild bundles for `ng build` — that's the build-speed win, since it does far
 ### Does moving to Vitest change how Angular tests are written?
 No — Vitest is a runner swap, not an API change.
 
-`TestBed`, `ComponentFixture`, `HttpTestingController` are unchanged. Karma launches a real browser to run tests; Vitest runs in Node/a lightweight environment instead, which is where the speed difference comes from.
+`TestBed`, `ComponentFixture`, `HttpTestingController` are unchanged. Karma launches a real browser to run tests; Vitest runs in Node with a simulated DOM (or optionally a real browser via Playwright), which is where the speed difference comes from. Vitest has been **the default runner for new projects since Angular 21**.
 
 ### What is `@let`, and how is it different from `computed()`?
 `@let` declares a read-only, template-scoped local variable.
@@ -1735,9 +1765,9 @@ Visible only within that template block and recalculated every change-detection 
 ```
 
 ### Is Signal Forms something you should know deeply for an interview?
-An in-progress, still-experimental signals-based alternative to reactive/template-driven forms.
+A signals-based alternative to reactive/template-driven forms, **shipped as experimental in Angular 21** (`@angular/forms/signals`).
 
-Know that it exists and the problem it targets — form state expressed as signals instead of the separate reactive-forms Observable API. It's still experimental, so don't over-invest in its API surface; if it comes up, it's more likely a "have you heard of it" question than an implementation one.
+The form wraps a signal of your model (`form(this.model, schema)`), validation is declared in a schema function, and field state is signals. Know that it exists and the problem it targets — no separate `FormControl` tree or `valueChanges` streams. It's still experimental, so don't over-invest in its API surface; Reactive Forms remain the production default.
 
 ### What is `afterRenderEffect()` for?
 An `effect()` variant guaranteed to run in the render phase — the safe point for DOM reads and writes — instead of at an arbitrary point in the change detection cycle.
@@ -1917,6 +1947,117 @@ this.api.submit(this.form.getRawValue()); // ✅ includes everything
 
 ---
 
+<a name="s23"></a>
+# 23. ⭐ Versions & What's Deprecated
+
+### What changed in Angular 17 → 21, in one breath?
+**17:** `@if`/`@for`/`@switch`, `@defer`, esbuild/Vite builder, standalone `ng new`; signal `input()`/`model()`/`output()` and signal queries in 17.x. **18:** zoneless (experimental), `@let`. **19:** `standalone: true` default, `linkedSignal`, `resource`, incremental hydration, route render modes, `provideAppInitializer`. **20:** signal APIs stable, zoneless stable (20.2), `httpResource`, `*ngIf`/`*ngFor` deprecated, `@angular/animations` deprecated. **21:** zoneless and Vitest by default, Signal Forms (experimental). (Check docs for anything newer.)
+
+### Is `*ngIf` deprecated? Are NgModules?
+`NgIf`, `NgFor` and `NgSwitch` were **deprecated in Angular 20** — they still work, and `ng generate @angular/core:control-flow` migrates them to `@if`/`@for`/`@switch`. **NgModules, `@Input`/`@Output`, constructor injection and class-based guards are not deprecated** — standalone, signal APIs, `inject()` and functional guards are simply preferred for new code. Deprecated means "still works, plan to migrate," not "removed." More: [Part 24](24-legacy-vs-modern-and-migration.md).
+
+---
+
+<a name="s24"></a>
+# 24. Control Flow & Templates — the details
+
+### What variables does `@for` give you?
+`$index`, `$count`, `$first`, `$last`, `$even`, `$odd` — no `let i = index` needed (alias with `let i = $index` in nested loops). `track` is mandatory; `@empty` renders when the list is empty.
+
+### What is `ngTemplateOutlet` for?
+Rendering an `ng-template` on demand **with data** — `*ngTemplateOutlet="tpl; context: { $implicit: item, index: i }"`, read in the template with `let-item` and `let-i="index"`. It's how a reusable list or table lets the parent supply the row template (like React render props). `ng-content` projects markup once; templates can be rendered many times with different data.
+
+### What are the `@defer` sub-blocks and rules?
+`@placeholder` (before loading, optional `minimum`), `@loading` (during, with `after`/`minimum` to avoid flicker), `@error`. Triggers: `on idle` (default), `viewport`, `interaction`, `hover`, `immediate`, `timer()`, `when cond`, plus `prefetch on …`. Only dependencies used **only** inside the block get split out. On the server, `@defer` renders the placeholder — unless you use `hydrate on …` (incremental hydration). More: [Part 04](04-directives.md), [Part 03](03-templates-and-data-binding.md).
+
+---
+
+<a name="s25"></a>
+# 25. Animations
+
+### How do you animate an element entering and leaving in modern Angular?
+`animate.enter="cls"` and `animate.leave="cls"` on the element (v20.2+), with the classes defined in CSS. Angular adds them at the right time and **waits for the leave animation** before removing the element — something plain CSS can't do, because the element is removed immediately. For JS animation libraries: `(animate.leave)="fn($event)"` and call `$event.animationComplete()`.
+
+### And `@angular/animations`?
+The older DSL — `trigger`, `state`, `transition(':enter' / ':leave')`, `query`/`stagger`, registered with `provideAnimationsAsync()`. **Deprecated in 20.2**, still in many apps. Either way: animate only `transform`/`opacity`, keep it under ~300ms, respect `prefers-reduced-motion`. More: [Part 28](28-animations.md).
+
+---
+
+<a name="s26"></a>
+# 26. Angular Material & CDK
+
+### Material vs CDK?
+Material = ready-styled Material Design components. CDK = the **unstyled behaviour** underneath: overlay positioning, focus trapping, drag and drop, virtual scroll, keyboard navigation, breakpoints. With your own design system, build on the CDK.
+
+### How would you build a custom dropdown or modal?
+CDK Overlay: renders above the page, positions next to the trigger and flips when there's no room, backdrop for outside clicks, keyboard events for Escape. For modals, `@angular/cdk/dialog` adds focus trap, focus restore and ARIA. Hand-rolled dropdowns usually fail on exactly those details.
+
+### How do you show 10,000 rows?
+`cdk-virtual-scroll-viewport` + `*cdkVirtualFor` (fixed height, accurate `itemSize`) so only visible rows exist in the DOM — or server pagination — plus `track` by id and OnPush. More: [Part 29](29-angular-material-and-cdk.md).
+
+---
+
+<a name="s27"></a>
+# 27. ⭐ Accessibility & i18n
+
+### How do you make an Angular app accessible?
+Semantic HTML first (real `<button>`, `<a>`, `<label>`, headings, landmarks), ARIA only where no native element exists, full keyboard support with visible focus, modals that trap and restore focus, focus + page `title` on route change, `LiveAnnouncer`/live regions for dynamic messages, contrast and alt text. Tools: Material, `cdk/a11y`, angular-eslint accessibility rules, axe in CI — plus a manual keyboard and screen-reader pass.
+
+### Built-in i18n vs ngx-translate / Transloco?
+`@angular/localize`: mark with `i18n`/`$localize`, `ng extract-i18n`, translate, **one build per locale** — fastest, missing translations caught at build time, but switching language loads a different build. Runtime libraries load JSON into one build — instant switching, editable without redeploy, small runtime cost. Plurals with ICU (`{count, plural, =0 {…} other {…}}`), never concatenate fragments, pipes format by `LOCALE_ID`, logical CSS properties for RTL. More: [Part 30](30-accessibility-and-i18n.md).
+
+---
+
+<a name="s28"></a>
+# 28. ⭐ Configuration, Startup & Deployment
+
+### How do you configure the API URL per environment?
+`environment.ts` + `fileReplacements` is build-time → one build per environment. For build-once-deploy-anywhere, ship a `config.json` each environment overwrites and load it at startup — fetch in `main.ts` before `bootstrapApplication` and provide via an `InjectionToken`, or `provideAppInitializer`. Frontend config is public — no secrets.
+
+### What is `provideAppInitializer`?
+Runs a function before the app renders and waits if it returns a Promise/Observable — for config, session restore, permissions. It replaced the `APP_INITIALIZER` multi-provider in v19. If it rejects, the app doesn't start — handle errors and keep it fast.
+
+### Refreshing a deep link gives 404 — why?
+The server looks for a file at that path; only Angular knows the route. Configure an SPA fallback (`try_files $uri /index.html` in nginx). Blank page under a sub-path → wrong `--base-href`. Cache hashed bundles forever, `index.html` and config `no-cache`. More: [Part 31](31-configuration-and-app-startup.md).
+
+---
+
+<a name="s29"></a>
+# 29. ⭐ Scaling — Nx, Micro-Frontends, Elements
+
+### How would you structure a codebase for several teams?
+Feature folders + lazy routes, then libraries (feature, data-access, ui, util) with public APIs, then an **Nx monorepo**: project graph, `nx affected` builds/tests, remote caching, and tag-based lint rules enforcing boundaries (feature → data-access → ui/util, never upwards; domains don't import each other).
+
+### Micro-frontends — how and when?
+Independently built and deployed UI pieces composed at runtime: a shell loads remotes via **Module Federation** (webpack) or **Native Federation** (esbuild/import maps), sharing `@angular/core`/RxJS as singletons. Worth it for **many autonomous teams** needing independent deploys; costs are version coordination, runtime failure modes, shared design/auth contracts and more infrastructure. One or two teams → monorepo instead.
+
+### What are Angular Elements?
+Angular components packaged as standard Custom Elements (`createCustomElement` + `customElements.define`) — usable in any page or framework; inputs become attributes/properties, outputs become DOM events. Each bundle carries the Angular runtime. More: [Part 32](32-scaling-nx-microfrontends-elements.md).
+
+---
+
+<a name="s30"></a>
+# 30. Testing — the modern bits
+
+### How do you set a signal input in a test?
+`fixture.componentRef.setInput('employee', value)`, then `await fixture.whenStable()` (or `detectChanges()`). It also marks OnPush components for checking. Effects: flush with `TestBed.tick()` (v20+, was `flushEffects`).
+
+### Karma vs Vitest vs Jest? Harnesses? E2E?
+Same `TestBed` APIs in all; Vitest is the default for new projects since v21, Jest common in existing apps, Karma the old browser-based default. **Harnesses** (`@angular/cdk/testing`) give stable APIs for Material components instead of querying internal classes. **E2E** with Playwright or Cypress for a few critical flows (Protractor is gone). In zoneless tests, use the runner's fake timers instead of `fakeAsync`. More: [Part 20](20-testing.md).
+
+---
+
+<a name="s31"></a>
+# 31. SSR — the modern bits
+
+### What is incremental hydration?
+The server renders full content, but each `@defer (hydrate on …)` section's JavaScript downloads and hydrates only on its trigger (`viewport`, `interaction`, `never`…). SEO and fast paint, with far less JavaScript up front. Enable with `withIncrementalHydration()`.
+
+### Can routes use different rendering strategies?
+Yes — server routes with `RenderMode.Prerender` (static at build time), `Server` (per request) or `Client` (browser only, e.g. dashboards), plus per-route status codes and headers. `PendingTasks` makes SSR wait for async work Angular doesn't track. More: [Part 21](21-ssr-and-hydration.md).
+
+---
+
 ## Before an interview
 
 ```
@@ -1924,6 +2065,8 @@ this.api.submit(this.form.getRawValue()); // ✅ includes everything
 2. Any question you stumble on → open the linked Part, reread that section only.
 3. The ⭐ sections are the highest yield: 3 (change detection), 5 (DI),
    17 (RxJS operators), 22 (scenarios).
+   For a 3–4 years role add: 4 (signals — linkedSignal, effect timing), 23 (versions &
+   deprecations), 27 (a11y/i18n), 28 (config & deploy), 29 (scaling).
 4. Then build the projects in Part 26. Notes stop helping before an interview does.
 ```
 

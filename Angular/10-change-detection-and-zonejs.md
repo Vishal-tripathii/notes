@@ -106,17 +106,20 @@ Checking everything is wasteful. `OnPush` tells Angular: *skip this component un
 
 ```
 Default   check this component on EVERY cycle
-OnPush    skip it unless one of four things happens
+OnPush    skip it unless one of five things happens
 ```
 
-The four things that mark an `OnPush` component dirty:
+The five things that mark an `OnPush` component for checking:
 
 ```
-1. an @Input REFERENCE changes
-2. an event fires from this component or its children
+1. an @Input REFERENCE changes (or a signal input gets a new value)
+2. an event fires from this component or its children (template listeners)
 3. markForCheck() is called
-4. an async pipe in its template emits
+4. an async pipe in its template emits          (the async pipe calls markForCheck for you)
+5. ⭐ a SIGNAL read in its template changes      (Angular 17+)
 ```
+
+Rule 5 is the modern one interviewers ask about. When a signal used in a template changes, Angular marks **that component** for refresh — and since v17 it can refresh just that component without re-checking the OnPush components above it on the way down. That's why "OnPush + signals" is the recommended default today.
 
 And skipping a component skips its **entire subtree**:
 
@@ -210,7 +213,16 @@ That's fine-grained reactivity, and it makes Zone.js unnecessary. **Zoneless** c
 
 The trade: without Zone.js, plain field mutation no longer triggers anything. State must live in signals, or you call `markForCheck` yourself.
 
-*(The zoneless provider's exact name has changed across versions — check the docs for yours.)*
+The provider is `provideZonelessChangeDetection()` — stable since v20.2 and **the default for new projects since v21** ([Part 27 §5](27-latest-angular-features.md)). (It was `provideExperimentalZonelessChangeDetection()` in v18–19.)
+
+### Still on Zone.js? Two settings worth knowing
+
+```ts
+provideZoneChangeDetection({ eventCoalescing: true, runCoalescing: true })
+```
+
+- **`eventCoalescing`** — one click that bubbles through several elements with listeners triggers **one** change detection run instead of several. (New projects created before zoneless was the default often already had this on.)
+- **Zone pollution** — third-party code (charts, maps, analytics) doing frequent `setTimeout`/`requestAnimationFrame` triggers change detection constantly. Spot it in the Angular DevTools profiler (many cycles with nothing changing); fix by initialising that library inside `runOutsideAngular` (§6).
 
 ---
 
@@ -227,7 +239,7 @@ Angular walks the component tree from the root down, re-evaluating every templat
 
 ### Q: What does `OnPush` do?
 
-It tells Angular to skip a component unless one of four things happens: an input reference changes, an event fires from the component or its children, `markForCheck` is called, or an async pipe in its template emits. Skipping a component skips its whole subtree, which is where the win comes from. The requirement is treating inputs as immutable — mutating an object won't change its reference, so the component won't update.
+It tells Angular to skip a component unless one of five things happens: an input reference changes, an event fires from the component or its children, `markForCheck` is called, an async pipe in its template emits, or — since Angular 17 — a signal read in its template changes. Skipping a component skips its whole subtree, which is where the win comes from. The requirement is treating inputs as immutable — mutating an object won't change its reference, so the component won't update.
 
 ### Q: `markForCheck` vs `detectChanges`?
 

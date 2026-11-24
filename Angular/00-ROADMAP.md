@@ -6,7 +6,7 @@
 >
 > **Honest time estimate:** ~45–60 hours if you're learning this material, not reviewing it. RxJS and change detection are the two that eat the budget.
 >
-> **Connects to:** [typescript track](../typescript/00-ROADMAP.md) — language-level questions (interface vs type, `unknown` vs `any`, generics, utility types) live there, not here; [Part 14](../typescript/14-typescript-in-angular.md) covers the Angular-specific bits (typed forms, `inject<T>`, typed `HttpClient`) · [javascript track](../javascript/00-ROADMAP.md).
+> **Connects to:** [typescript track](../typescript/00-ROADMAP.md) — language-level questions (interface vs type, `unknown` vs `any`, generics, utility types) live there, not here; [Part 00 here](00-typescript-for-angular.md) covers the Angular-specific bits (generics in `HttpClient`/forms/signals, utility types, strict templates) · [javascript track](../javascript/00-ROADMAP.md).
 
 ---
 
@@ -32,7 +32,7 @@ Step 2 is the one people skip and it's the one that separates a memorised answer
 
 | # | Part | Priority | Status |
 |---|---|---|---|
-| 00 | [TypeScript for Angular](00-typescript-for-angular.md) | ⭐⭐⭐⭐☆ | 🟡 in progress (2/12 topics) |
+| 00 | [TypeScript for Angular](00-typescript-for-angular.md) | ⭐⭐⭐⭐☆ | ✅ done (all 10 topic groups) |
 | 01 | Angular architecture & bootstrap | ⭐⭐⭐⭐☆ | ✅ done (Q&A only) |
 | 02 | Components | ⭐⭐⭐⭐⭐ | ✅ done |
 | 03 | Templates & data binding | ⭐⭐⭐⭐☆ | ✅ done |
@@ -60,13 +60,20 @@ Step 2 is the one people skip and it's the one that separates a memorised answer
 | 24 | Legacy vs modern & migration | ⭐⭐⭐⭐☆ | ✅ done |
 | 25 | Angular vs React | ⭐⭐⭐☆☆ | ✅ done |
 | 26 | Machine coding — projects | ⭐⭐⭐⭐☆ | ✅ done |
-| 27 | Latest Angular features (post-signals) | ⭐⭐⭐☆☆ | ✅ done |
+| 27 | Latest Angular features (post-signals) | ⭐⭐⭐☆☆ | ✅ done (updated to v21) |
+| 28 | 🆕 [Animations](28-animations.md) | ⭐⭐⭐☆☆ | ✅ done |
+| 29 | 🆕 [Angular Material & CDK](29-angular-material-and-cdk.md) | ⭐⭐⭐☆☆ | ✅ done |
+| 30 | 🆕 [Accessibility & i18n](30-accessibility-and-i18n.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 31 | 🆕 [Configuration, Startup & Deployment](31-configuration-and-app-startup.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 32 | 🆕 [Scaling Up — Nx, Micro-Frontends, Elements](32-scaling-nx-microfrontends-elements.md) | ⭐⭐⭐⭐☆ | ✅ done |
 
 > **Track complete** — every part written. Parts 14–27 were written directly to file rather than taught in chat first.
 >
 > **What's left is not reading.** Build the two projects in [Part 26](26-machine-coding-projects.md), then say the ⭐⭐⭐⭐⭐ answers out loud. Speaking exposes gaps that re-reading hides.
 >
-> 📋 **[Interview Question Bank](QNA-INTERVIEW-BANK.md)** — ~200 questions across 22 sections, answered in spoken form. Drill from here, not from the notes.
+> 📋 **[Interview Question Bank](QNA-INTERVIEW-BANK.md)** — ~250 questions across 31 sections, answered in spoken form. Drill from here, not from the notes.
+>
+> 🆕 **Gap review (Nov 2026):** 5 new parts (28–32), Part 00 completed, 11 parts extended, and version-sensitive facts updated to **Angular 21** — see Phase 7 below. Angular ships a major every ~6 months; re-check Part 24's version table against the docs for anything newer.
 
 ---
 
@@ -342,13 +349,34 @@ Deliberately not another CRUD app. The point is asynchrony:
 
 ---
 
+# PHASE 7 — Gap-review additions 🆕
+
+## Part 28 — [Animations](28-animations.md) ⭐⭐⭐☆☆
+Why leaving elements need help · `animate.enter`/`animate.leave` (v20.2+) · the deprecated `@angular/animations` DSL you'll still meet · view transitions · reduced motion.
+
+## Part 29 — [Angular Material & CDK](29-angular-material-and-cdk.md) ⭐⭐⭐☆☆
+Material vs CDK · dialogs, tables, theming (Material 3) · CDK Overlay for dropdowns/modals · drag & drop · virtual scroll · `cdk/a11y`, layout, Angular Aria.
+
+## Part 30 — [Accessibility & i18n](30-accessibility-and-i18n.md) ⭐⭐⭐⭐☆
+Semantic HTML before ARIA · keyboard & focus (modals, route changes) · live announcements · testing a11y · `@angular/localize` vs runtime libraries · ICU plurals · `LOCALE_ID` · RTL.
+
+## Part 31 — [Configuration, Startup & Deployment](31-configuration-and-app-startup.md) ⭐⭐⭐⭐☆
+`environment.ts` vs runtime `config.json` · `provideAppInitializer` · startup hooks · `angular.json` configurations · SPA fallback, base href, caching, Docker.
+
+## Part 32 — [Scaling Up — Libraries, Nx, Micro-Frontends, Elements](32-scaling-nx-microfrontends-elements.md) ⭐⭐⭐⭐☆
+The growing-pains ladder · libraries & public APIs · Nx (affected, caching, boundaries) · Module/Native Federation and when not to · Angular Elements.
+
+**Also extended in the gap review:** Part 00 (completed — classes, unions, enums, generics, utility types, `!`, decorators, strict templates) · Part 03 (`ngTemplateOutlet`, `ng-content` details) · Part 04 (`@for` variables, `*ngIf` deprecation, `@defer` sub-blocks & rules) · Part 10 (5th OnPush trigger — signals; event coalescing, zone pollution) · Part 11 (`linkedSignal`, `untracked`, equality, `toSignal` options, effect timing) · Part 16 (`createActionGroup`, `createFeature`, entity, SignalStore `withEntities`/`rxMethod`/`withHooks`) · Part 18 (reading the DevTools profiler) · Part 20 (Vitest/Jest, `setInput`, zoneless tests, harnesses, Playwright/Cypress) · Part 21 (incremental hydration, per-route render modes, `PendingTasks`, hydration mismatches) · Part 24 (version table 16–21, corrected deprecations) · Part 27 (`resource` `params`/`stream` rename, zoneless & Vitest defaults, Signal Forms).
+
+---
+
 # Interview priority — what to revise last
 
 | Priority | Topics |
 |---|---|
 | ⭐⭐⭐⭐⭐ | Components · Lifecycle · Component communication · **DI** · **RxJS** · Change detection · Routing · Reactive forms |
-| ⭐⭐⭐⭐☆ | HttpClient & interceptors · Standalone · Signals · Performance · Auth · TypeScript · Legacy vs modern · Machine coding |
-| ⭐⭐⭐☆☆ | Pipes · Directives · Internals · State management · Testing · Error handling · Patterns · Angular vs React · Latest features (`resource()`, zoneless) |
+| ⭐⭐⭐⭐☆ | HttpClient & interceptors · Standalone · Signals · Performance · Auth · TypeScript · Legacy vs modern · Machine coding · **Accessibility & i18n** · **Configuration & deployment** · **Scaling (Nx, micro-frontends)** |
+| ⭐⭐⭐☆☆ | Pipes · Directives · Internals · State management · Testing · Error handling · Patterns · Angular vs React · Latest features (`resource()`, zoneless) · **Animations** · **Material & CDK** |
 | ⭐⭐☆☆☆ | SSR & hydration |
 
 If you have one week left, it's DI + RxJS + change detection + forms + routing. Those five carry most interviews.

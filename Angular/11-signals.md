@@ -14,6 +14,7 @@
 2. [`signal()` — a value that announces changes](#signal)
 3. [`computed()` — derived state](#computed) ⭐
 4. [`effect()` — for side effects only](#effect) ⭐
+   - [4.5 The rest of the toolbox: `linkedSignal`, `untracked`, equality, `toSignal` options](#advanced) ⭐
 5. [Signals in components](#components)
 6. [Bridging to RxJS](#bridging)
 7. [Signals vs RxJS](#vs-rxjs) ⭐
@@ -98,7 +99,9 @@ constructor() {
 }
 ```
 
-An effect runs once immediately, then again whenever any signal it read changes.
+An effect runs **at least once**, then again whenever any signal it read changes. ⚠️ It does **not** run synchronously the moment you create it — Angular **schedules** it. Effects created in a component run during change detection, just before that component's template is checked; "root" effects (in services) run as part of the app's change-detection pass too. And if several signals change in a row, the effect runs **once** with the final values, not once per change.
+
+Must be created in an **injection context** (constructor or field initializer) — or pass `{ injector }`. It's destroyed automatically with its component.
 
 **The rule:** if you're producing a value, use `computed`. Use `effect` only for things outside Angular — logging, `localStorage`, analytics, a third-party chart library.
 
@@ -116,7 +119,71 @@ effect((onCleanup) => {
 });
 ```
 
-⚠️ Writing to a signal inside an effect is a common way to create loops. Reach for `computed` first.
+⚠️ Writing to a signal inside an effect is a common way to create loops. Reach for `computed` (or `linkedSignal`, §4.5) first. (Old code may pass `{ allowSignalWrites: true }` — that option was removed in v19; writes are allowed now, but still usually a design smell.)
+
+---
+
+<a name="advanced"></a>
+# 4.5 ⭐ The rest of the signal toolbox
+
+### `linkedSignal()` — derived, but you can still overwrite it (v19, stable v20)
+
+`computed()` is read-only. Sometimes you want "a value that **resets** when its source changes, but the user can also change it." Classic case: a selected option that should reset when the list changes.
+
+```ts
+options  = input.required<string[]>();
+selected = linkedSignal(() => this.options()[0]);   // follows options…
+
+pick(o: string) { this.selected.set(o); }           // …but writable by the user
+// when options() changes, selected resets to the new first option
+```
+
+> 🧠 **Remember:** `computed` = **calculated, read-only.** `linkedSignal` = **calculated default you're allowed to overwrite.** `signal` = **just a box.**
+
+### `untracked()` — read without subscribing
+
+Inside a `computed` or `effect`, every signal you read becomes a dependency. Wrap a read in `untracked` when you want its current value but **don't** want changes to it to re-run you:
+
+```ts
+effect(() => {
+  const user = this.user();                         // re-run when user changes…
+  const theme = untracked(() => this.theme());      // …but NOT when theme changes
+  analytics.log('user-changed', { user, theme });
+});
+```
+
+### Custom equality
+
+By default a signal notifies when the new value isn't `Object.is`-equal. You can change that:
+
+```ts
+filters = signal({ q: '', page: 1 }, { equal: (a, b) => a.q === b.q && a.page === b.page });
+filters.set({ q: '', page: 1 });   // equal → nobody notified
+```
+
+### `toSignal` options
+
+```ts
+user  = toSignal(this.user$);                              // Signal<User | undefined> — undefined until first emit
+user2 = toSignal(this.user$, { initialValue: null });      // Signal<User | null>
+count = toSignal(this.store.count$, { requireSync: true });// Observable emits synchronously (BehaviorSubject) → no undefined
+```
+
+`toSignal` subscribes immediately and unsubscribes when the component is destroyed. If the Observable errors, reading the signal **throws** — handle errors in the stream (`catchError`) first.
+
+### Signal input `transform` and `alias`
+
+```ts
+disabled = input(false, { transform: booleanAttribute });   // <app-x disabled> → true
+size     = input(0, { transform: numberAttribute });        // <app-x size="3"> → 3
+```
+
+### Reading a signal "inside" a template is what makes it reactive
+
+```ts
+// ✅ the template reads count() → this view updates when count changes (even with OnPush / zoneless)
+// ❌ copying it into a plain field once (this.n = this.count()) loses that link
+```
 
 ---
 
@@ -190,6 +257,14 @@ Both hold a current value. The signal is simpler for plain state: read it by cal
 ### Q: My signal changed but nothing updated. Why?
 
 Almost certainly a mutation. Signals compare with `Object.is`, so pushing to an array or setting a property on an object inside a signal keeps the same reference and notifies nobody. Set a new array or object instead.
+
+### Q: `computed` vs `linkedSignal`?
+
+`computed` is derived and read-only. `linkedSignal` is derived too, but writable — it resets whenever its source changes, and in between you can `set` it. Use it for things like a selection that should reset when its list of options changes.
+
+### Q: When does an effect run?
+
+At least once, but not synchronously when created — Angular schedules it and runs it during change detection (component effects just before that component is checked). Several signal changes in a row cause one run with the latest values. Use `untracked()` for reads that shouldn't trigger it.
 
 ### Q: How do signals know their dependencies?
 

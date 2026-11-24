@@ -392,6 +392,51 @@ This produces **nothing**. It sits in memory until something asks Angular to ren
 
 Every structural directive compiles into one of these behind the scenes — [Part 04](04-directives.md).
 
+### ⭐ `ngTemplateOutlet` — render a template somewhere, with data
+
+`ngTemplateOutlet` is how you **render an `ng-template` on demand** and **pass it data**. It's the basis of "let the parent decide how each row looks" components.
+
+```html
+<ng-template #userRow let-user let-i="index">       <!-- let-user = the $implicit value -->
+  <span>{{ i + 1 }}. {{ user.name }}</span>
+</ng-template>
+
+<ng-container *ngTemplateOutlet="userRow; context: { $implicit: someUser, index: 0 }" />
+```
+
+- **`let-x`** with no value receives the context's **`$implicit`** property.
+- **`let-i="index"`** receives `context.index`.
+- Import `NgTemplateOutlet` (it's a directive, not a built-in block).
+
+**The real use — a reusable list where the parent supplies the row template:**
+
+```ts
+@Component({
+  selector: 'app-list',
+  imports: [NgTemplateOutlet],
+  template: `
+    @for (item of items(); track $index) {
+      <ng-container *ngTemplateOutlet="rowTemplate(); context: { $implicit: item, index: $index }" />
+    }
+  `,
+})
+export class ListComponent<T> {
+  items = input.required<T[]>();
+  rowTemplate = contentChild.required<TemplateRef<{ $implicit: T; index: number }>>(TemplateRef);
+}
+```
+
+```html
+<!-- parent: decides what each row looks like -->
+<app-list [items]="users()">
+  <ng-template let-user let-i="index">
+    <b>{{ user.name }}</b> — {{ user.email }}
+  </ng-template>
+</app-list>
+```
+
+> 🧠 **Remember:** `ng-content` projects **markup once**. `ng-template` + `ngTemplateOutlet` lets the child **render the parent's template many times, with different data** — like React's "render props."
+
 ## ng-content — content projection
 
 The parent passes markup *into* the child.
@@ -428,6 +473,10 @@ You can have multiple named slots:
 <ng-content select="[header]"></ng-content>
 <ng-content></ng-content>
 ```
+
+`select` takes a CSS selector — an attribute (`[header]`), element (`app-footer`) or class (`.actions`). Anything not matched goes to the `<ng-content>` without `select`. Since Angular 18 you can give an `<ng-content>` **fallback content** for when the parent passes nothing: `<ng-content select="[icon]">⭐</ng-content>`. If the projected element doesn't match your selector (e.g. it's wrapped in an `ng-container`), use **`ngProjectAs="[header]"`** on it.
+
+⚠️ `ng-content` content is always created by the parent even if you hide it with `@if` — projection can't be lazy. For conditional or repeated content, use `ng-template` + `ngTemplateOutlet` instead.
 
 One subtle point worth remembering: projected content belongs to the **parent**. The parent creates it, and the parent's lifecycle governs it. That's exactly why Angular has two different hooks — `ngAfterContentInit` for projected content, `ngAfterViewInit` for the component's own template ([Part 07](07-lifecycle-hooks.md)).
 

@@ -41,6 +41,17 @@ Network tab                      is it actually the API, not Angular at all?
 
 Angular DevTools' profiler is the specific one people don't know: it records change detection cycles and shows you which components were checked and how long each took. Nine times out of ten it points straight at the culprit.
 
+### Reading the Angular DevTools profiler
+
+1. Install the **Angular DevTools** browser extension, open DevTools → **Angular** tab → **Profiler** → Start recording, do the slow interaction, stop.
+2. The **bar chart** shows one bar per change detection cycle. Look for:
+   - **many cycles while nothing visibly changes** → something triggers CD constantly: a `setInterval`, a third-party script, `mousemove`/`scroll` listeners. That's **zone pollution** — move it into `runOutsideAngular` ([Part 10 §6](10-change-detection-and-zonejs.md)), or go zoneless.
+   - **one tall bar** → a single cycle is expensive. Click it.
+3. The **flame graph / tree** for a cycle shows each component and how long its template check took. Expensive ones usually have a **method call or heavy pipe in the template**, a large `@for` without a good `track`, or they're `Default` instead of `OnPush`.
+4. The **Injector tree** and **component explorer** tabs show which providers each component sees and its current inputs/signal values — useful for "why are there two instances of this service?"
+
+Also useful: `ng.getComponent($0)` in the console (select an element first) returns its component instance; Chrome's Performance panel shows Angular-specific tracks (component render times) when the app runs in dev mode.
+
 ---
 
 <a name="two-kinds"></a>

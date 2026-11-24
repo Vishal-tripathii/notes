@@ -220,6 +220,51 @@ loadEmployees$ = createEffect(() =>
 
 **Why selectors exist:** they're memoised, so a derived value recomputes only when its slice changes, and components depend on the selector rather than the state shape — you can restructure the tree without touching them.
 
+### ⭐ Modern NgRx with less boilerplate: `createActionGroup`, `createFeature`, entity
+
+The code above is the "classic" style. Current NgRx removes most of the typing:
+
+```ts
+// all actions of a feature in one place — names are generated from the event text
+export const EmployeesActions = createActionGroup({
+  source: 'Employees',
+  events: {
+    'Load': emptyProps(),
+    'Load Success': props<{ employees: Employee[] }>(),
+    'Load Failure': props<{ error: string }>(),
+  },
+});
+// usage: EmployeesActions.load(), EmployeesActions.loadSuccess({ employees })
+```
+
+```ts
+// @ngrx/entity — a normalised { ids, entities } collection with ready-made updaters
+const adapter = createEntityAdapter<Employee>({ sortComparer: (a, b) => a.name.localeCompare(b.name) });
+
+export const employeesFeature = createFeature({
+  name: 'employees',
+  reducer: createReducer(
+    adapter.getInitialState({ loading: false }),
+    on(EmployeesActions.load,        (s) => ({ ...s, loading: true })),
+    on(EmployeesActions.loadSuccess, (s, { employees }) => adapter.setAll(employees, { ...s, loading: false })),
+  ),
+  extraSelectors: ({ selectEmployeesState }) => adapter.getSelectors(selectEmployeesState),
+});
+// createFeature generates selectEmployeesState, selectLoading, … plus selectAll/selectEntities from the adapter
+```
+
+```ts
+// register + read
+provideStore(), provideState(employeesFeature), provideEffects(EmployeesEffects), provideStoreDevtools()
+employees = this.store.selectSignal(employeesFeature.selectAll);   // a Signal, no async pipe
+```
+
+Why **entity**: storing lists as arrays means "update employee 42" is a `map` over everything and duplicates creep in. Entity keeps `{ ids: [...], entities: { 42: {...} } }` — O(1) lookups, one copy of each record — and gives you `addOne`, `updateOne`, `upsertMany`, `removeOne`.
+
+Functional effects (no class) are also possible: `export const load = createEffect((actions$ = inject(Actions), api = inject(EmployeeApi)) => …, { functional: true })`.
+
+**NgRx DevTools** (Redux DevTools extension) shows every action and the state after it — time-travel debugging is the main reason teams accept the boilerplate.
+
 ---
 
 <a name="signalstore"></a>
@@ -244,6 +289,41 @@ export const CartStore = signalStore(
 ```
 
 No actions, no reducers, no dispatch — but still one place per feature with an enforced shape.
+
+### More SignalStore building blocks
+
+```ts
+export const EmployeesStore = signalStore(
+  withEntities<Employee>(),                         // @ngrx/signals/entities: ids/entities/entityMap signals
+  withState({ filter: '', loading: false }),
+  withComputed(({ entities, filter }) => ({
+    visible: computed(() => entities().filter(e => e.name.includes(filter()))),
+  })),
+  withMethods((store, api = inject(EmployeeApi)) => ({
+    setFilter(filter: string) { patchState(store, { filter }); },
+    // rxMethod: an RxJS pipeline you call like a function — debounce, switchMap, etc.
+    load: rxMethod<void>(pipe(
+      tap(() => patchState(store, { loading: true })),
+      switchMap(() => api.getAll().pipe(
+        tapResponse({
+          next: (list) => patchState(store, setAllEntities(list), { loading: false }),
+          error: () => patchState(store, { loading: false }),
+        }),
+      )),
+    )),
+  })),
+  withHooks({ onInit(store) { store.load(); } }),   // run when the store is created
+);
+```
+
+- **Provide it where it should live:** `{ providedIn: 'root' }` for app-wide state, or `providers: [EmployeesStore]` on a component for **one store per screen instance** (destroyed with the component — great for wizard/form-page state).
+- **`withHooks`** — `onInit`/`onDestroy`. **`rxMethod`** — bridge to RxJS for debounced or cancellable work. **`withProps`/`signalStoreFeature`** — share reusable chunks (e.g. a "loading + error" feature) between stores.
+
+| Choose | When |
+|---|---|
+| **service with signals** | most apps; a few shared pieces of state |
+| **SignalStore** | many features with similar patterns, want structure without Redux ceremony |
+| **NgRx Store** | big teams, complex cross-feature flows, need action log / time-travel / strict event history |
 
 ---
 

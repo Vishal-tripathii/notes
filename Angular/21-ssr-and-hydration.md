@@ -53,7 +53,29 @@ provideClientHydration()
 
 That single provider is the difference. Without it, SSR gives you a fast first paint followed by an ugly re-render.
 
-**Incremental hydration** goes further — hydrating a component only when it's needed, pairing with `@defer` triggers so below-the-fold sections stay dormant until scrolled to.
+### ⭐ Incremental hydration (v19 preview, stable v20)
+
+Normal hydration wakes up the **whole page** at once — all its JavaScript must download and run before anything is interactive. **Incremental hydration** keeps parts of the page as plain server HTML until they're actually needed:
+
+```ts
+provideClientHydration(withIncrementalHydration())   // also turns on event replay
+```
+
+```html
+@defer (hydrate on viewport) {        <!-- server renders the REAL content; JS downloads + hydrates when scrolled into view -->
+  <app-reviews [productId]="id()" />
+}
+@defer (hydrate on interaction) {     <!-- hydrate when the user clicks/types inside it -->
+  <app-size-picker />
+}
+@defer (hydrate never) {              <!-- static forever: never ships its JS -->
+  <app-footer />
+}
+```
+
+The difference from plain `@defer`: plain `@defer` shows a **placeholder** on the server (bad for SEO and layout); `hydrate` triggers render the **full content** on the server and only delay the *JavaScript*. Triggers: `on idle`, `on viewport`, `on interaction`, `on hover`, `on immediate`, `on timer(…)`, `when cond`, `never`.
+
+> **Analogy 🏬 — a shop that opens departments as customers arrive.** The whole building is visible (server HTML), but each department turns its lights and tills on only when someone walks in.
 
 ---
 
@@ -107,6 +129,43 @@ SSG   render once at build time    docs, marketing, blogs — fastest possible
 
 **When SSR isn't worth it:** an internal tool behind authentication. Nobody crawls it, users load it once and keep it open, and you've added a Node server to operate for no benefit.
 
+### ⭐ Choosing per route — server routes and render modes (v19+, stable v20)
+
+You don't have to pick one strategy for the whole app. A **server routes** config sets the render mode **per route**:
+
+```ts
+// app.routes.server.ts
+import { RenderMode, ServerRoute } from '@angular/ssr';
+
+export const serverRoutes: ServerRoute[] = [
+  { path: '',             renderMode: RenderMode.Prerender },   // SSG: built once at build time
+  { path: 'blog/:slug',   renderMode: RenderMode.Prerender,
+    async getPrerenderParams() { return (await getSlugs()).map(slug => ({ slug })); } },
+  { path: 'product/:id',  renderMode: RenderMode.Server },      // SSR on every request
+  { path: 'dashboard/**', renderMode: RenderMode.Client },      // CSR: behind login, no SEO
+  { path: '**',           renderMode: RenderMode.Server },
+];
+```
+
+```ts
+// app.config.server.ts  (v20+; in v19 this was provideServerRoutesConfig(serverRoutes))
+provideServerRendering(withRoutes(serverRoutes))
+```
+
+Server routes can also set the **HTTP status** (`status: 404` for a not-found route) and response **headers** — important for SEO (a "not found" page returning 200 confuses search engines).
+
+### Other SSR details worth knowing
+
+- **`HttpClient` transfer cache** — with hydration on, GET (and HEAD) responses made during SSR are embedded in the page and reused by the browser automatically. Tune with `withHttpTransferCacheOptions({ includePostRequests: true, filter: ... })`. Requests with auth headers are skipped by default.
+- **Absolute URLs on the server** — relative API URLs like `/api/x` may not resolve on the server; use full URLs or an interceptor that adds the base URL during SSR.
+- **`PendingTasks`** — SSR waits until the app is "stable" before sending HTML. Work Angular doesn't know about (a manual `fetch`) won't be waited for; wrap it so it counts:
+  ```ts
+  private pending = inject(PendingTasks);
+  await this.pending.run(() => fetchSomething());   // SSR waits for this
+  ```
+- **Hydration mismatch errors** (NG0500-range) happen when the server HTML differs from what the client would render — dates/time zones, `Math.random()`, browser-only branches, or invalid HTML (a `<div>` inside a `<p>`). Skip a component with `ngSkipHydration` only as a last resort.
+- **`@angular/ssr`** replaced Angular Universal (`@nguniversal/*`) in v17; `ng add @angular/ssr` sets everything up.
+
 ---
 
 ## 6. Interview Q&A
@@ -122,6 +181,14 @@ Server-rendered HTML is visible but has no listeners or bindings. Hydration is A
 ### Q: What breaks when a component renders on the server?
 
 Anything browser-only — `window`, `document`, `localStorage`, direct DOM access. I guard those with `isPlatformBrowser` or move them into `afterNextRender`, which never runs on the server.
+
+### Q: What is incremental hydration?
+
+Rendering the full content on the server but delaying each section's JavaScript and hydration until a trigger — `@defer (hydrate on viewport)`, `on interaction`, or `never` for static parts. You keep SEO and fast first paint while shipping and running far less JavaScript up front. Enabled with `withIncrementalHydration()`.
+
+### Q: Can different routes use different rendering strategies?
+
+Yes — server routes set a `RenderMode` per path: `Prerender` (static at build time) for marketing and blog pages, `Server` for public personalised pages, `Client` for authenticated dashboards. They can also set status codes like 404 and headers.
 
 ### Q: When would you not use SSR?
 
