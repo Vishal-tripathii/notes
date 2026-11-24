@@ -8,12 +8,211 @@
 
 ## Table of Contents
 
+0. [Simple version — start here](#simple)
 1. [The join types](#types)
 2. [`LEFT` vs `INNER` — concrete row-count case](#left-inner)
 3. [`SELF JOIN`](#self)
 4. [How joins actually execute](#execution)
 5. [Interview Questions & Answers](#interview)
 6. [Cheat Sheet](#cheatsheet)
+
+---
+
+<a name="simple"></a>
+## 0. Simple version — start here
+
+### The big idea
+
+A **join** puts two tables side by side and pairs up rows that belong together.
+
+**Analogy:** You have two lists:
+- a **guest list** (customers)
+- a **receipts pile** (orders), where each receipt has the guest's ID written on it
+
+A join is you matching each receipt to the guest it belongs to. The join *type* decides **what happens to the leftovers**: guests with no receipt, and receipts with no matching guest.
+
+```
+   customers            orders
+  ┌─────────┐        ┌─────────┐
+  │         │        │         │
+  │   only  │ match  │  only   │
+  │  cust.  │ ██████ │ orders  │
+  │         │ ██████ │         │
+  └─────────┘        └─────────┘
+
+  INNER JOIN  → only the ██ middle (matches)
+  LEFT JOIN   → everything on the LEFT + matches
+  RIGHT JOIN  → everything on the RIGHT + matches
+```
+
+### Example 1: Customers and orders (INNER vs LEFT vs RIGHT)
+
+**customers**
+
+| id | name  |
+|----|-------|
+| 1  | Asha  |
+| 2  | Ravi  |
+| 3  | Meera ← never ordered anything |
+
+**orders**
+
+| id  | customer_id | amount |
+|-----|-------------|--------|
+| 101 | 1           | 500    |
+| 102 | 1           | 200    |
+| 103 | 2           | 300    |
+| 104 | 9 ← customer 9 doesn't exist | 150 |
+
+The matching rule is `orders.customer_id = customers.id`. Draw the links:
+
+```
+customers              orders
+ 1 Asha  ───────────── 101 (cust 1)
+         └──────────── 102 (cust 1)
+ 2 Ravi  ───────────── 103 (cust 2)
+ 3 Meera     (no link)
+             (no link) 104 (cust 9)
+```
+
+**INNER JOIN: "only pairs that are linked"**
+
+```sql
+SELECT c.name, o.id, o.amount
+FROM customers c
+INNER JOIN orders o ON o.customer_id = c.id;
+```
+
+| name | order id | amount |
+|------|----------|--------|
+| Asha | 101 | 500 |
+| Asha | 102 | 200 |
+| Ravi | 103 | 300 |
+
+Meera is **gone** (she has no order). Order 104 is **gone** (it has no customer).
+
+**LEFT JOIN: "keep every row on the left, even if it has no partner"**
+
+```sql
+SELECT c.name, o.id, o.amount
+FROM customers c          -- left table
+LEFT JOIN orders o ON o.customer_id = c.id;
+```
+
+| name  | order id | amount |
+|-------|----------|--------|
+| Asha  | 101  | 500  |
+| Asha  | 102  | 200  |
+| Ravi  | 103  | 300  |
+| Meera ← kept, with empty order columns | NULL | NULL |
+
+**RIGHT JOIN: "keep every row on the right"**
+
+Same query with `RIGHT JOIN`: every **order** is kept.
+
+| name | order id | amount |
+|------|----------|--------|
+| Asha | 101 | 500 |
+| Asha | 102 | 200 |
+| Ravi | 103 | 300 |
+| NULL ← order with no customer | 104 | 150 |
+
+People rarely write RIGHT JOIN. They swap the two tables and use LEFT JOIN, because it reads more easily.
+
+**Notice:** Asha shows up **twice**. A join gives one output row **per matching pair**, not one per customer. This catches a lot of people. If you then do `SUM(amount)` on another joined table, the totals can come out doubled.
+
+**Bonus pattern interviewers love: "find customers who never ordered"**
+
+```sql
+SELECT c.name
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id
+WHERE o.id IS NULL;     -- → Meera
+```
+
+LEFT JOIN keeps everyone. The `IS NULL` filter then keeps only the people with no partner.
+
+> **Remember this:** INNER = "matched couples only". LEFT = "everyone from the left, partner or not". A missing partner shows up as NULL.
+
+### Example 2: SELF JOIN (a table joined with itself)
+
+There's no `SELF JOIN` keyword. It just means you use **the same table twice** under two nicknames.
+
+**employees**
+
+| id | name   | manager_id |
+|----|--------|------------|
+| 1  | Priya  | NULL ← CEO, no boss |
+| 2  | Karan  | 1 |
+| 3  | Neha   | 1 |
+| 4  | Arjun  | 2 |
+
+The manager is also an employee, so the "boss" information lives in the **same table**:
+
+```
+        Priya (1)
+        /       \
+   Karan (2)   Neha (3)
+      |
+   Arjun (4)
+```
+
+**Analogy:** Print the table twice. Call one copy **e** (employee) and the other **m** (manager). For each row in e, find the row in m whose `id` equals e's `manager_id`.
+
+```sql
+SELECT e.name AS employee, m.name AS manager
+FROM employees e
+LEFT JOIN employees m ON e.manager_id = m.id;
+```
+
+| employee | manager |
+|----------|---------|
+| Priya | NULL  |
+| Karan | Priya |
+| Neha  | Priya |
+| Arjun | Karan |
+
+Why LEFT and not INNER? Priya's `manager_id` is NULL, so she has no match. INNER JOIN would **drop the CEO** from the list.
+
+> **Remember this:** Self join = one table, two nicknames. Use it when a row points to another row in the same table (employee → manager, comment → parent comment).
+
+### Example 3: CROSS JOIN (every row paired with every row)
+
+No matching rule here. **Every** row on one side is paired with **every** row on the other.
+
+**colors:** Red, Blue  **sizes:** S, M, L
+
+```sql
+SELECT c.name, s.size FROM colors c CROSS JOIN sizes s;
+```
+
+```
+        S        M        L
+Red   Red-S    Red-M    Red-L
+Blue  Blue-S   Blue-M   Blue-L
+```
+
+That's 2 × 3 = **6 rows**. It's useful for building every product variant or every date × store combination.
+
+**Danger:** if you forget the `ON` condition by mistake, you get a cross join. Two tables of 10,000 rows each become **100 million rows**.
+
+> **Remember this:** CROSS = multiply. Rows out = rows in A × rows in B.
+
+### One-line summary
+
+| Join | Keeps |
+|------|-------|
+| INNER | only matched pairs |
+| LEFT | all left rows, plus matches (NULL if none) |
+| RIGHT | all right rows, plus matches (NULL if none) |
+| CROSS | every possible pair |
+| SELF | any of the above, with one table used twice |
+
+### Quick self-check
+
+1. In Example 1, how many rows does `customers LEFT JOIN orders` give if Asha had **5** orders instead of 2?
+2. You write `LEFT JOIN orders o ON ...` and then add `WHERE o.amount > 100`. What happens to Meera, and why does the LEFT JOIN quietly turn into an INNER JOIN?
+3. `orders` has 10 million rows and `customer_id` has no index. Why is the join slow, and what's the fix? (See [section 4](#execution).)
 
 ---
 
