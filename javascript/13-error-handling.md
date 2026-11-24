@@ -59,6 +59,33 @@ try {
 }
 ```
 
+### Keep the original error: `cause` (ES2022)
+
+When you catch a low-level error and throw a clearer one, attach the original so the real reason isn't lost:
+
+```js
+try {
+  await db.save(order);
+} catch (err) {
+  throw new Error('Could not save order', { cause: err });   // err stays available as .cause
+}
+```
+
+Logging tools and DevTools show the `cause` chain — "Could not save order ← connection refused." For custom classes, pass it through: `super(message, { cause })`.
+
+### `AggregateError` — several errors at once
+
+`Promise.any` rejects with an `AggregateError` when **every** promise fails; its `.errors` array holds each reason. You can throw one yourself when validating many things: `throw new AggregateError(errors, 'Validation failed')`.
+
+### Global last-resort handlers (browser)
+
+```js
+window.addEventListener('error', (e) => report(e.error));                    // uncaught throw
+window.addEventListener('unhandledrejection', (e) => report(e.reason));      // promise nobody caught
+```
+
+These are for **reporting** (send to Sentry etc.), not for normal error handling. (Node's equivalents: [nodejs Part 2.5](../nodejs/02.5-eventemitter-process-and-errors.md).)
+
 ## 4. Catching Async Errors
 
 > **Definition:** a synchronous `try`/`catch` only intercepts exceptions thrown **synchronously** within its block — it cannot catch a promise's rejection unless that promise is actually `await`ed inside the `try`, because a rejection happens on a later microtask turn, after the `try` block has already finished running.

@@ -180,7 +180,7 @@ reassign(orig); console.log(orig.x); // still 'changed' — reassigning the para
 1 + true    // 2     — true → 1
 ```
 
-**Falsy values, all seven:** `false, 0, -0, 0n, '', null, undefined, NaN`. Everything else (`[]`, `{}`, `'0'`) is truthy.
+**Falsy values, all eight:** `false, 0, -0, 0n, '', null, undefined, NaN`. Everything else (`[]`, `{}`, `'0'`, `'false'`) is truthy. (Memory trick: **"no value, zero-ish, or not-a-number."**) Deeper coercion rules: [Part 29](29-strict-mode-and-coercion-deep-dive.md).
 
 ## 7. `==` vs `===`
 

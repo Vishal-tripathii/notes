@@ -27,6 +27,58 @@ const arr2 = [3, 1, 2];
 ```
 **Why `sort()` mutating matters:** forgetting this is a very common real bug — passing an array you don't own into `.sort()` (e.g. a prop, a cached reference) silently changes it for every other holder of that reference.
 
+### ⚠️ The #1 `sort()` gotcha: it compares as **strings** by default
+
+```js
+[10, 1, 2, 25].sort();          // [1, 10, 2, 25]  ❌ — "10" comes before "2" alphabetically
+[10, 1, 2, 25].sort((a, b) => a - b);   // [1, 2, 10, 25] ✅ ascending
+[10, 1, 2, 25].sort((a, b) => b - a);   // [25, 10, 2, 1] ✅ descending
+```
+
+Without a comparator, `sort()` turns every element into a string and sorts alphabetically — like a dictionary. So **always pass a comparator for numbers.**
+
+The comparator rule: return **negative** → `a` first, **positive** → `b` first, **0** → keep their order. `a - b` does exactly that for numbers.
+
+```js
+users.sort((a, b) => a.age - b.age);                    // by number
+users.sort((a, b) => a.name.localeCompare(b.name));     // by text, handles accents / languages properly
+users.sort((a, b) => a.city.localeCompare(b.city) || a.age - b.age);   // city, then age
+```
+
+`sort` is **stable** (since ES2019): items that compare equal keep their original order — that's what makes the "city, then age" trick reliable.
+
+> 🧠 **Remember:** `sort()` with no comparator = **dictionary order.** Numbers need `(a, b) => a - b`.
+
+### The copying versions (ES2023) — no more `[...arr].sort()`
+
+| Mutates the original | Returns a new array instead |
+|---|---|
+| `arr.sort(fn)` | `arr.toSorted(fn)` |
+| `arr.reverse()` | `arr.toReversed()` |
+| `arr.splice(i, n, ...items)` | `arr.toSpliced(i, n, ...items)` |
+| `arr[i] = x` | `arr.with(i, x)` |
+
+```js
+const prices = [30, 10, 20];
+const sorted = prices.toSorted((a, b) => a - b);   // [10, 20, 30]
+prices;                                             // [30, 10, 20] — untouched ✅
+const updated = prices.with(0, 99);                 // [99, 10, 20]
+```
+
+These are perfect for React/Angular state, where you must never mutate the old array.
+
+### More useful modern methods
+
+```js
+[5, 12, 8, 130].findLast(n => n > 10);        // 130 — search from the end
+[5, 12, 8, 130].findLastIndex(n => n > 10);   // 3
+Object.groupBy(users, u => u.city);           // { Pune: [...], Delhi: [...] } (ES2024)
+Map.groupBy(users, u => u.city);              // same, but a Map
+Array.from({ length: 3 }, (_, i) => i * 2);   // [0, 2, 4] — build an array from a length
+Array.from(new Set([1, 1, 2]));               // [1, 2]
+arr.includes(NaN);                            // true — unlike indexOf(NaN), which is -1
+```
+
 ## 2. `map` vs `forEach`
 
 > **Definition — `map`:** creates and returns a **new array** by calling a provided function on every element of the original array, collecting the return values.
@@ -109,6 +161,12 @@ const rotateArray = (arr, k) => {
 
 **Q: Why does `sort()` mutating matter, concretely?**
 > If you pass a shared array reference into `.sort()` without copying first, you silently mutate it for every other place holding that same reference — a very real bug with props/cached data/references passed around a codebase.
+
+**Q: What does `[10, 1, 2].sort()` return, and why?**
+> `[1, 10, 2]`. Without a comparator, `sort` converts elements to strings and compares them alphabetically, and `"10"` comes before `"2"`. For numbers, pass `(a, b) => a - b`. It also sorts in place — use `toSorted()` if the original must stay unchanged.
+
+**Q: How do you sort without mutating the original array?**
+> `arr.toSorted(compareFn)` (ES2023), or in older code `[...arr].sort(compareFn)`. Same family: `toReversed()`, `toSpliced()`, `with(index, value)` — each returns a new array. Important for UI state, where mutation breaks change detection.
 
 **Q: Predict:**
 ```js

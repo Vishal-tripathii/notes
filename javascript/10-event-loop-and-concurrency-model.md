@@ -31,9 +31,11 @@ JS has one call stack, one thing runs at a time. Slow work (timers, network, DOM
 1. Run all synchronous code (empty the call stack)
 2. Drain the ENTIRE microtask queue (promises, queueMicrotask) — completely, before anything else
 3. Run ONE task from the macrotask queue (setTimeout, DOM events, postMessage)
-4. Before the next repaint: run requestAnimationFrame callbacks
-5. Repaint
-6. Back to step 2 — check microtasks again
+4. Drain microtasks again
+5. IF it's time for a new frame (~every 16ms at 60Hz — not after every task):
+   run requestAnimationFrame callbacks → style → layout → paint
+6. Back to step 3
+... repeat
 ... repeat
 ```
 **The critical rule:** microtasks are drained **completely** — if a microtask schedules another microtask, that one runs too, before any macrotask or repaint happens. This is why a runaway promise chain can starve rendering and timers entirely, even though nothing is technically "blocking" in the traditional sense.
@@ -44,8 +46,10 @@ setTimeout(() => console.log('2'), 0);              // macrotask
 Promise.resolve().then(() => console.log('3'));       // microtask
 requestAnimationFrame(() => console.log('4'));          // render-aligned, its own queue
 console.log('5');
-// 1, 5, 3, 4 (right before the next repaint), 2 (next macrotask turn)
-// exact 4-vs-2 ordering can vary by browser/frame timing — the reliable part is 1,5,3 first
+// usually: 1, 5, 3, 2, 4
+// guaranteed: 1, 5, 3 first (sync, then microtasks).
+// 2 vs 4: the timer is ready after ~1ms, but the next frame is up to ~16ms away,
+// so the timeout USUALLY runs first — not guaranteed (a frame may already be due).
 ```
 
 ## 4. `requestAnimationFrame` vs `setTimeout(fn, 16)`

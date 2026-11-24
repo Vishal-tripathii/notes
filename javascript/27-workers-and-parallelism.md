@@ -85,6 +85,8 @@ worker.postMessage(sab);   // no copy — both threads see the same underlying m
 // ⚠️ shared memory reintroduces race conditions — needs Atomics for safe coordination
 ```
 
+> ⚠️ **In browsers, `SharedArrayBuffer` only exists on "cross-origin isolated" pages.** After the Spectre CPU attacks, browsers require the page to be served with two headers — `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` — otherwise `SharedArrayBuffer` is `undefined`. Check with `self.crossOriginIsolated`. (Node's `worker_threads` has no such requirement.)
+
 ```js
 // Transferable objects — ownership moves, zero-copy, but the sender loses access
 const buffer = new ArrayBuffer(1024 * 1024 * 50); // 50MB
@@ -348,4 +350,9 @@ Both Web Worker & worker_threads: own memory, postMessage only, no shared state 
 SharedArrayBuffer / transferable objects: the escape hatches when copying is the bottleneck
 Service Worker lifecycle: install → activate → fetch (repeats)
 ⚠️ Service Worker + no cache versioning → users stuck on stale deploys forever
+SharedArrayBuffer in browsers needs COOP + COEP headers (crossOriginIsolated)
 ```
+
+---
+
+**Previous:** [Part 26 — Interview Discussion Practice](26-interview-discussion-practice.md) · **Next:** [Part 28 — Numbers & Dates](28-numbers-and-dates.md)

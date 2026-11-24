@@ -1,6 +1,6 @@
 # 🟨 JavaScript Study Notes — Master Roadmap
 
-> **Purpose:** the full study plan for the JavaScript track — the language underneath everything else in this repo. 28 parts, ordered so each depends only on what came before it. Every part is its own note file in this folder (`NN-topic-slug.md`), same convention as [Angular](../Angular/00-ROADMAP.md) and [nodejs](../nodejs/).
+> **Purpose:** the full study plan for the JavaScript track — the language underneath everything else in this repo. 36 parts (the original 28 + 8 added in a gap review against a 3–4-years-experience bar, marked 🆕), ordered so each depends only on what came before it. Every part is its own note file in this folder (`NN-topic-slug.md`), same convention as [Angular](../Angular/00-ROADMAP.md) and [nodejs](../nodejs/).
 >
 > **Format per part:** a proper definition for every concept, code snippets, predict-before-you-run output, interview Q&A, and follow-up scenario-style challenge questions.
 >
@@ -42,8 +42,18 @@
 | 25 | [Coding & Machine Coding Round](25-coding-and-machine-coding-round.md) | ⭐⭐⭐⭐⭐ | ✅ done |
 | 26 | [Interview Discussion Practice](26-interview-discussion-practice.md) | ⭐⭐⭐⭐⭐ | ✅ done |
 | 27 | [Workers & Parallelism](27-workers-and-parallelism.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 28 | 🆕 [Numbers & Dates](28-numbers-and-dates.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 29 | 🆕 [Strict Mode & Coercion Deep Dive](29-strict-mode-and-coercion-deep-dive.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 30 | 🆕 [Events in Depth](30-events-in-depth.md) | ⭐⭐⭐⭐☆ | ✅ done |
+| 31 | 🆕 [Proxy & Reflect](31-proxy-and-reflect.md) | ⭐⭐⭐☆☆ | ✅ done |
+| 32 | 🆕 [Browser Rendering & Loading](32-browser-rendering-and-loading.md) | ⭐⭐⭐⭐⭐ | ✅ done |
+| 33 | 🆕 [Front-End Security](33-frontend-security.md) | ⭐⭐⭐⭐⭐ | ✅ done |
+| 34 | 🆕 [Async Iteration](34-async-iteration.md) | ⭐⭐⭐☆☆ | ✅ done |
+| 35 | 🆕 [Build Tooling](35-build-tooling.md) | ⭐⭐⭐☆☆ | ✅ done |
 
-**If you have one week left:** closures + event loop + promises/async-await + `this` + prototypes + output-based drills (Parts 01, 03, 08, 10–12, 24). Those six carry most JavaScript interviews.
+**Gap review additions (🆕):** 8 new parts above, plus — Part 05 (default `sort()` is alphabetical, `toSorted`/`with`/`findLast`/`groupBy`), Part 11 (synchronous executor, `finally` pass-through, thenables, `unhandledrejection`, `withResolvers`), Part 12 (`return await` inside `try`), Part 13 (`cause`, `AggregateError`, global handlers), Part 17 (`WeakRef`/`FinalizationRegistry`), Part 20 (storage limits, IndexedDB, `BroadcastChannel`, `postMessage` origin checks), Part 23 (ES2022–ES2025 features), Part 24 (now **52** drills), Part 25 (deepEqual, get/set by path, `allSettled`/`race`/`any` polyfills, `withTimeout`, interval from `setTimeout`, cancellable debounce, autocomplete, async memoize). Several output answers were also corrected (strict-mode `this`, `#private` parse errors, `super()`, frozen writes, `{} + []`).
+
+**If you have one week left:** closures + event loop + promises/async-await + `this` + prototypes + output-based drills (Parts 01, 03, 08, 10–12, 24). Those six carry most JavaScript interviews. **For a front-end role at 3–4 years, add** Parts 30 (events), 32 (rendering, `async`/`defer`, Web Vitals) and 33 (security).
 
 ---
 
@@ -191,13 +201,41 @@ Web Worker (`postMessage`/`onmessage`, `SharedArrayBuffer`, transferable objects
 
 ---
 
+# PHASE 7 — Gap-review additions 🆕
+
+## Part 28 — [Numbers & Dates](28-numbers-and-dates.md) ⭐⭐⭐⭐☆
+`0.1 + 0.2` · money as integer cents · `NaN`/`Number.isNaN` · `parseInt` radix · safe integers & big ids · `Date` traps (0-based months, UTC parsing) · `Intl` · `Temporal`.
+
+## Part 29 — [Strict Mode & Coercion Deep Dive](29-strict-mode-and-coercion-deep-dive.md) ⭐⭐⭐⭐☆
+What strict mode changes · `ToPrimitive` · the `+` rules · the real `==` algorithm · `[] == ![]` worked out.
+
+## Part 30 — [Events in Depth](30-events-in-depth.md) ⭐⭐⭐⭐☆
+`target` vs `currentTarget` · `preventDefault` vs `stopPropagation` · non-bubbling events · `passive`/`once`/`signal` · removing listeners · custom events · keyboard/input/form/pointer events.
+
+## Part 31 — [Proxy & Reflect](31-proxy-and-reflect.md) ⭐⭐⭐☆☆
+Traps · `Reflect` · validation/defaults/read-only · reactivity (Vue 3) · limits.
+
+## Part 32 — [Browser Rendering & Loading](32-browser-rendering-and-loading.md) ⭐⭐⭐⭐⭐
+`async`/`defer`/modules · rendering pipeline · reflow & layout thrashing · `DocumentFragment` · long tasks · Core Web Vitals · observers.
+
+## Part 33 — [Front-End Security](33-frontend-security.md) ⭐⭐⭐⭐⭐
+XSS (3 kinds) · CSP · CORS · CSRF & `SameSite` · token storage · clickjacking · `noopener` · SRI · secrets in bundles.
+
+## Part 34 — [Async Iteration](34-async-iteration.md) ⭐⭐⭐☆☆
+`for await` · async generators · paginated APIs · fetch streams · cleanup.
+
+## Part 35 — [Build Tooling](35-build-tooling.md) ⭐⭐⭐☆☆
+Bundlers · transpile vs polyfill · tree-shaking · code splitting · source maps · hashed file names · bundle-size checklist.
+
+---
+
 # Interview priority — what to revise last
 
 | Priority | Topics |
 |---|---|
-| ⭐⭐⭐⭐⭐ | Closures · Functions · `this`/`call`/`apply`/`bind` · Objects · Arrays · Prototype & Inheritance · Event Loop · Promises · async/await · Advanced Functional Patterns · Polyfills · Event Delegation · Output Drills · Machine Coding · Discussion Practice |
-| ⭐⭐⭐⭐☆ | JS Fundamentals · Classes · Workers & Parallelism |
-| ⭐⭐⭐☆☆ | Strings & Regex · Destructuring · Error Handling · Map/Set/WeakMap/WeakSet · Modules · Memory Management · Browser APIs · Performance Patterns · Modern Features |
+| ⭐⭐⭐⭐⭐ | Closures · Functions · `this`/`call`/`apply`/`bind` · Objects · Arrays · Prototype & Inheritance · Event Loop · Promises · async/await · Advanced Functional Patterns · Polyfills · Event Delegation · Output Drills · Machine Coding · Discussion Practice · **Browser Rendering & Loading** · **Front-End Security** |
+| ⭐⭐⭐⭐☆ | JS Fundamentals · Classes · Workers & Parallelism · **Numbers & Dates** · **Strict Mode & Coercion** · **Events in Depth** |
+| ⭐⭐⭐☆☆ | Strings & Regex · Destructuring · Error Handling · Map/Set/WeakMap/WeakSet · Modules · Memory Management · Browser APIs · Performance Patterns · Modern Features · **Proxy & Reflect** · **Async Iteration** · **Build Tooling** |
 | ⭐⭐☆☆☆ | Generators & Iterators |
 
 ---

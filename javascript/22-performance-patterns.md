@@ -4,6 +4,8 @@
 
 **Topics:** applying [Part 18](18-advanced-functional-patterns.md)'s debounce/throttle to real DOM events · lazy loading · event delegation as a performance technique · `requestAnimationFrame` for animation.
 
+> For *why* pages get slow — reflow, layout thrashing, long tasks, Core Web Vitals, `async`/`defer` — see [Part 32](32-browser-rendering-and-loading.md). For bundle size, [Part 35](35-build-tooling.md).
+
 ---
 
 ## 1. Debounce/Throttle on Real DOM Events

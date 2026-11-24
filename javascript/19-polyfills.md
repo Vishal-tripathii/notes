@@ -57,7 +57,9 @@ Array.prototype.myReduce = function (callback, initialValue) {
 
 ```js
 Function.prototype.myCall = function (thisArg, ...args) {
-  thisArg = thisArg ?? globalThis;              // null/undefined thisArg → global object
+  thisArg = Object(thisArg ?? globalThis);      // null/undefined → global object (non-strict behaviour);
+                                                // Object() wraps primitives: fn.myCall(5) can't put a
+                                                // property on the number 5, but can on Number(5)
   const fnKey = Symbol('fn');                     // unique key avoids clobbering a real property
   thisArg[fnKey] = this;                            // `this` here is the function myCall was called ON
   const result = thisArg[fnKey](...args);           // invoking AS A METHOD sets `this` correctly (Part 03)

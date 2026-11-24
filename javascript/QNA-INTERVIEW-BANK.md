@@ -4,7 +4,7 @@
 >
 > Answers are the *spoken* version, not the essay. Sections link to the note that explains them properly.
 >
-> **~194 questions · 25 sections**
+> **~240 questions · 33 sections** (sections 26–33 and new questions in 6, 12 and 13 were added in the gap review — each links to its full note).
 
 ---
 
@@ -37,6 +37,14 @@
 | 23 | [Performance Patterns](#s23) | [Part 22](22-performance-patterns.md) |
 | 24 | [Modern JavaScript Features (ES2020+)](#s24) | [Part 23](23-modern-javascript-features.md) |
 | 25 | [Workers & Parallelism](#s25) ⭐ | [Part 27](27-workers-and-parallelism.md) |
+| 26 | [Numbers & Dates](#s26) ⭐ | [Part 28](28-numbers-and-dates.md) |
+| 27 | [Strict Mode & Coercion](#s27) | [Part 29](29-strict-mode-and-coercion-deep-dive.md) |
+| 28 | [Events in Depth](#s28) ⭐ | [Part 30](30-events-in-depth.md) |
+| 29 | [Proxy & Reflect](#s29) | [Part 31](31-proxy-and-reflect.md) |
+| 30 | [Browser Rendering & Loading](#s30) ⭐ | [Part 32](32-browser-rendering-and-loading.md) |
+| 31 | [Front-End Security](#s31) ⭐ | [Part 33](33-frontend-security.md) |
+| 32 | [Async Iteration](#s32) | [Part 34](34-async-iteration.md) |
+| 33 | [Build Tooling](#s33) | [Part 35](35-build-tooling.md) |
 
 ---
 
@@ -286,7 +294,11 @@ A shallow copy (`{...state}`) still shares every nested object with the original
 
 ### Why does `sort()` mutating matter as a real production bug?
 
-Passing a shared array reference — a prop, a cached value — into `.sort()` silently changes it for every other place holding that same reference, since `sort` mutates in place and also returns the same array. Copy first with `[...arr].sort()` if the original needs to stay untouched.
+Passing a shared array reference — a prop, a cached value — into `.sort()` silently changes it for every other place holding that same reference, since `sort` mutates in place and also returns the same array. Use `arr.toSorted(fn)` (ES2023) — or `[...arr].sort(fn)` in older code — when the original must stay untouched. Same family: `toReversed()`, `toSpliced()`, `with(i, value)`.
+
+### What does `[10, 1, 2].sort()` return?
+
+`[1, 10, 2]`. With no comparator, `sort` converts every element to a **string** and sorts alphabetically, and `"10"` comes before `"2"`. Numbers always need a comparator: `(a, b) => a - b` for ascending, `b - a` for descending; text should use `a.localeCompare(b)`. Sort is stable, so `a.city.localeCompare(b.city) || a.age - b.age` sorts by city, then age.
 
 ### `map` vs `forEach`?
 
@@ -426,7 +438,7 @@ Iterating an object built with `Object.create(somePrototype)` via bare `for...in
 
 ### What does `class` desugar to?
 
-Exactly the constructor-function pattern: methods declared in the class body land on the prototype, `extends` sets up an `Object.create`-based chain, and `super(...)` is mechanically `Parent.call(this, ...)`. `class` bodies also run in strict mode implicitly, and methods are non-enumerable by default — neither of which the old pattern gave you for free.
+Mostly the constructor-function pattern: methods declared in the class body land on the prototype, and `extends` links the prototype chain. `class` bodies also run in strict mode, methods are non-enumerable, and the constructor can't be called without `new`. **One real difference:** in a derived class, `this` is created by the *parent* constructor during `super()` — the old pattern created `this` first and then ran `Parent.call(this)`. That's why `class X extends Array` / `extends Error` works properly and the old trick couldn't.
 
 ### `#field` vs the `_field` convention vs the closure/module pattern — what's actually enforced?
 
@@ -434,7 +446,7 @@ Exactly the constructor-function pattern: methods declared in the class body lan
 
 ### What does `super()` actually do under the hood?
 
-Calls the parent class's constructor with `this` bound to the instance currently being built — the class-syntax equivalent of `Parent.call(this, ...args)` in the constructor-function pattern.
+Runs the parent class's constructor, which **creates** the object and initializes it; once it returns, `this` in the child refers to that object. It's *like* `Parent.call(this, ...args)` in the old pattern, but not identical — there, the child had already created `this`. ⚠️ Related trap: `obj.#field` written outside the class is a **parse-time** SyntaxError — the whole file won't run, not just that line.
 
 ### Why does referencing `this` before `super()` in a derived class throw?
 
@@ -503,6 +515,14 @@ Generally yes for timers registered in the same relative order — the timer que
 
 Pending, fulfilled, or rejected — and once it moves out of pending, it's **settled permanently** and can never change state again. Calling `resolve()` twice, or `resolve()` then `reject()`, is silently a no-op after the first call. That guarantee is what makes `.then()` reliable — a callback attached to a promise fires exactly once, ever, with a value that can't be swapped out from under it later.
 
+### Does the function inside `new Promise(...)` run synchronously?
+
+Yes — the executor runs **immediately**, during the `new Promise` call. Only `.then`/`.catch`/`.finally` callbacks are async. And `resolve()` isn't a `return` — code after it in the executor still runs. `console.log('A'); new Promise(r => { console.log('B'); r(); console.log('C'); }).then(() => console.log('D')); console.log('E')` prints `A B C E D`.
+
+### What does `.finally()` pass along?
+
+The **original** result — `Promise.resolve(1).finally(() => 2)` still resolves to `1`; `finally` gets no argument and its return value is ignored. Exception: if the `finally` callback throws or returns a rejected promise, that rejection replaces the result. Similarly, `.then(notAFunction)` is ignored and the value passes through.
+
 ### How does `.then()` chaining actually work, and why does each call return a *new* promise?
 
 `.then()` can't reuse the original promise, because it's already settled and immutable — its job is to produce the *next* value in the chain, which depends entirely on what the callback returns: a plain value, a thrown error, or another promise to wait on. A fresh promise represents that next step; if the callback returns another promise, the chain "flattens" and waits for it too, turning nested async steps into a flat sequence instead of a callback pyramid.
@@ -538,6 +558,10 @@ The whole `.then()` chain waits forever, since `Promise.all` only settles once e
 ### Is `async`/`await` a new concurrency mechanism?
 
 No — it's sugar over the same promises and microtask queue. `async` only changes syntax: the function returns a promise, and if it throws, that promise rejects. There's no new runtime machinery underneath.
+
+### `return promise` vs `return await promise` inside a `try` — does it matter?
+
+Yes. `return fetchUser()` hands back the promise and **leaves the `try` immediately**, so if it rejects later the `catch` never runs. `return await fetchUser()` waits inside the `try`, so the rejection is caught. **Rule: inside `try`, use `return await`.** Outside a `try`, the two behave the same for the caller.
 
 ### How does `await` actually suspend a function without blocking the thread?
 
@@ -696,7 +720,7 @@ It can be called conditionally, inside a function, in response to an event — a
 
 ### Why can't you `require()` a genuine ESM module synchronously?
 
-`require()`'s contract is synchronous — call it, get the exports back immediately. ESM loading is inherently asynchronous by design, so a genuine ES module simply can't be squeezed through a synchronous API; Node lets ESM `import` a CommonJS module in many cases, but not cleanly the other way around.
+`require()`'s contract is synchronous — call it, get the exports back immediately — while ESM loading can be asynchronous (top-level `await`). On older Node that meant `ERR_REQUIRE_ESM`. **Since Node 22.12 / 20.19, `require()` of an ES module works as long as it has no top-level `await`**; with top-level `await` it still fails, and dynamic `import()` works everywhere. ESM importing CommonJS has always worked.
 
 ### ESM exports are live bindings — if module A exports a `let count` and increments it internally, does an importing module B see the update automatically?
 
@@ -849,7 +873,7 @@ Each write is atomic and last-write-wins, so there's no corruption, but there is
 
 ### `textContent` vs `innerHTML` — when does the difference actually matter?
 
-`textContent` always treats its argument as literal text; `innerHTML` parses it as HTML markup. It matters the moment untrusted content is involved — assigning user input directly to `innerHTML` is a classic XSS vector, since any embedded `<script>` or event-handler attribute gets parsed and can execute. `textContent` is the safe default unless markup is genuinely needed, and even then it should go through a sanitizer first.
+`textContent` always treats its argument as literal text; `innerHTML` parses it as HTML markup. It matters the moment untrusted content is involved — assigning user input directly to `innerHTML` is a classic XSS vector. Detail: a `<script>` tag inserted this way does **not** run — but event-handler attributes do, e.g. `<img src=x onerror="steal()">`. `textContent` is the safe default unless markup is genuinely needed, and even then it should go through a sanitizer first.
 
 ### Bubbling vs capturing, and what's `addEventListener`'s third argument for?
 
@@ -980,6 +1004,178 @@ Each `cluster` worker is a full separate OS process — genuinely full core util
 
 ---
 
+<a name="s26"></a>
+# 26. ⭐ Numbers & Dates
+
+### Why is `0.1 + 0.2 !== 0.3`?
+
+All JS numbers are 64-bit **binary** floating point, and decimals like 0.1 can't be stored exactly in binary — like 1/3 in decimal — so tiny errors appear (`0.30000000000000004`). Every IEEE 754 language does this. Compare with a tolerance (`Math.abs(a - b) < Number.EPSILON`), and for **money store integer cents** (or use a decimal library).
+
+### `isNaN` vs `Number.isNaN`?
+
+Global `isNaN` converts first, so `isNaN('hello')` is `true`. `Number.isNaN` is only true for the real `NaN` value — always use it. `NaN === NaN` is `false`, so `x === NaN` never works; `[NaN].includes(NaN)` is `true` but `indexOf(NaN)` is `-1`.
+
+### What does `['1','2','3'].map(parseInt)` return?
+
+`[1, NaN, NaN]` — `map` passes `(value, index)`, and `parseInt` reads the index as the radix: `parseInt('2', 1)` and `parseInt('3', 2)` are invalid. Use `.map(Number)` or `parseInt(s, 10)`. Also remember `Number('')` is `0`, and `parseInt('42px', 10)` is `42` while `Number('42px')` is `NaN`.
+
+### Why is a large id from the API wrong in the browser?
+
+Numbers are exact only up to `Number.MAX_SAFE_INTEGER` (2⁵³ − 1). A 64-bit id parsed by `JSON.parse` loses its last digits silently. Send big ids as **strings**, or use `BigInt`.
+
+### A user's birthday shows one day early. Why?
+
+`new Date('2026-01-15')` — a date-only ISO string is parsed as **UTC midnight**; shown in a time zone behind UTC it's the evening of the 14th. (With a time but no zone, `'2026-01-15T00:00'`, it's parsed as *local*.) Keep date-only values as `YYYY-MM-DD` strings, store real moments in UTC, and format for display with `Intl.DateTimeFormat`. Also: months are 0-based (`new Date(2026, 0, 15)` is January), and `Date` objects are mutable. More: [Part 28](28-numbers-and-dates.md).
+
+---
+
+<a name="s27"></a>
+# 27. Strict Mode & Coercion
+
+### What does strict mode change, and when is it on?
+
+It's on automatically in **ES modules and class bodies** (otherwise `'use strict'`). Assigning to an undeclared variable throws instead of creating a global; `this` in a plain function call is `undefined` instead of `window`; writes to read-only or frozen properties throw; `with` and duplicate parameter names are banned. Many output questions change with it — say which mode you're assuming.
+
+### Why is `[] == ![]` true?
+
+`![]` is `false` (arrays are truthy). `[] == false` → the boolean becomes `0` → the array becomes the primitive `''` → `''` becomes `0` → `0 == 0`. **`==` order to remember: booleans become numbers first, objects become primitives, strings become numbers; `null` only equals `undefined`.** Use `===` (except `x == null`).
+
+### How does an object become a primitive?
+
+`ToPrimitive` with a hint. Number/default hint: try `valueOf`, then `toString`; string hint: `toString` first. Plain objects and arrays return themselves from `valueOf`, so `toString` decides: `String({})` is `'[object Object]'`, `String([1,2])` is `'1,2'`. `Symbol.toPrimitive` overrides all of it.
+
+### Why is `null >= 0` true when `null == 0` is false?
+
+`>=` converts `null` to `0`. `==` has its own rule: `null` equals only `undefined`. More: [Part 29](29-strict-mode-and-coercion-deep-dive.md).
+
+---
+
+<a name="s28"></a>
+# 28. ⭐ Events in Depth
+
+### `event.target` vs `event.currentTarget`?
+
+`target` = where the event **started** (the element actually clicked, maybe a child). `currentTarget` = the element whose **listener is running**. In delegation the listener is on the parent, so you use `e.target.closest('li')` to find the item. `currentTarget` is `null` after the handler returns (e.g. after an `await`).
+
+### `preventDefault` vs `stopPropagation`?
+
+`preventDefault` = "browser, skip your default action" (following the link, submitting the form) — the event still travels. `stopPropagation` = "other elements, don't hear this" — the default still happens. `stopImmediatePropagation` also stops other listeners on the same element. Avoid `stopPropagation` as a habit — it breaks delegation and click-outside logic.
+
+### Why doesn't my delegated `focus` handler fire?
+
+`focus`/`blur` don't bubble. Use `focusin`/`focusout` (they do), or listen in the capture phase. Same family: `mouseenter`/`mouseleave` don't bubble (`mouseover`/`mouseout` do).
+
+### Why doesn't `removeEventListener` work?
+
+It needs the **same function reference** and the same `capture` value — a new arrow function is a different function. Keep the handler in a variable, or register with `{ signal }` and call `controller.abort()` to remove many listeners at once.
+
+### `input` vs `change`? And what's `passive: true`?
+
+`input` fires on every edit (typing, paste, autofill) — use it for live search; `change` fires when the value is committed (blur for text, immediately for checkboxes). `passive: true` promises you won't `preventDefault`, so the browser can scroll without waiting for your handler — smoother touch/wheel scrolling. More: [Part 30](30-events-in-depth.md).
+
+---
+
+<a name="s29"></a>
+# 29. Proxy & Reflect
+
+### What is a Proxy, and what would you use it for?
+
+A wrapper around an object that **intercepts** operations — get, set, delete, `in`, function calls — through handler functions called traps. Like a hotel receptionist between you and the room. Uses: validation on assignment, default values, read-only views, logging, and **reactivity**.
+
+### Why use `Reflect` inside traps?
+
+`Reflect.get/set/...` perform the **default** behaviour and return the right result (`true`/`false` for `set`); passing `receiver` keeps getters, setters and inheritance working. Pattern: do your extra work, then `return Reflect.set(target, key, value, receiver)`.
+
+### How does Vue 3 know your data changed?
+
+State is wrapped in a Proxy: the `get` trap records which component read which property, the `set` trap re-runs only those. Vue 2 used `Object.defineProperty`, which couldn't see newly added properties or array index writes — Proxy fixed that. Downsides of Proxy: slower, nested objects aren't wrapped automatically, `proxy !== target`, and `Map`/`#private` break unless methods are bound. More: [Part 31](31-proxy-and-reflect.md).
+
+---
+
+<a name="s30"></a>
+# 30. ⭐ Browser Rendering & Loading
+
+### `async` vs `defer` scripts?
+
+Both download without blocking HTML parsing. **`async`** runs as soon as it arrives, in **no guaranteed order** — for independent scripts like analytics. **`defer`** runs **in order, after parsing**, before `DOMContentLoaded` — for app code. `<script type="module">` is deferred by default. A plain `<script>` in `<head>` stops parsing until it downloads and runs.
+
+### What's reflow, and what is layout thrashing?
+
+**Reflow** = the browser recalculating positions and sizes — triggered by geometry changes (width, margins, adding elements) and by *reading* layout (`offsetHeight`, `getBoundingClientRect`) after a change. **Layout thrashing** = reading and writing layout alternately in a loop, forcing a reflow every iteration. Fix: **read everything, then write everything**, put visual writes in `requestAnimationFrame`, insert many nodes at once with a `DocumentFragment`, and animate only `transform`/`opacity`.
+
+### What are Core Web Vitals?
+
+**LCP** (largest content shown, ≤ 2.5 s) — loading. **INP** (interaction to next paint, ≤ 200 ms; replaced FID in 2024) — responsiveness. **CLS** (layout shift, ≤ 0.1) — stability. "Load, interact, stay still." Fixes: preload/prioritise the hero image and cut render-blocking resources; break up long tasks and move work to workers; set image dimensions and reserve space for late content.
+
+### The page freezes when the user clicks "Export." What do you do?
+
+It's a **long task** (> 50 ms) blocking the main thread. Confirm in the Performance panel, then move the work to a Web Worker or split it into chunks that yield (`await new Promise(r => setTimeout(r, 0))` / `scheduler.yield()`), and show a loading state first.
+
+### Which observers exist and what are they for?
+
+`IntersectionObserver` — is an element on screen (lazy loading, infinite scroll). `ResizeObserver` — did an element change size. `MutationObserver` — did the DOM change. They replace polling and scroll/resize handlers. Always `disconnect()` on cleanup. More: [Part 32](32-browser-rendering-and-loading.md).
+
+---
+
+<a name="s31"></a>
+# 31. ⭐ Front-End Security
+
+### What is XSS and how do you prevent it?
+
+Attacker JavaScript running on **your** origin in another user's browser — stored (in the DB), reflected (in the URL), or DOM-based (your code inserts untrusted data). Prevent: render as text (`textContent`, framework escaping), sanitize required HTML with DOMPurify, avoid `innerHTML`/`eval`/`javascript:` URLs and the framework escape hatches (`dangerouslySetInnerHTML`, `bypassSecurityTrustHtml`, `v-html`), add a **CSP**, and keep tokens in `HttpOnly` cookies.
+
+### What does a Content Security Policy do?
+
+A response header listing allowed sources for scripts, styles, images, connections and frames. The browser blocks everything else — including inline scripts and `eval` by default — so injected code doesn't run. Use nonces for your own inline scripts, avoid `'unsafe-inline'`, roll out with `Report-Only` first. "Escaping stops XSS getting in; CSP stops it running."
+
+### You get a CORS error. How do you fix it?
+
+On the **server**: return `Access-Control-Allow-Origin` with your origin, handle the `OPTIONS` preflight (sent for PUT/DELETE, JSON bodies, `Authorization` headers), and for cookies use `credentials: 'include'` plus `Allow-Credentials: true` with an exact origin. Front-end code can't fix it (a dev-server proxy can, locally). CORS protects users' data from other sites' JS — not your server.
+
+### CSRF and `SameSite`?
+
+CSRF: another site makes the user's browser send a request to yours, and the browser attaches their cookies. `SameSite=Lax` (modern default) stops cookies on cross-site POSTs and background requests; `Strict` stops them even on links. Add CSRF tokens / `Origin` checks for sensitive actions; never change data on GET. Bearer tokens in headers aren't CSRF-able, but are readable by JS.
+
+### Where should a browser app keep its auth token?
+
+**Not `localStorage`** — every script on the page can read it, so any XSS steals it. Use an `HttpOnly; Secure; SameSite` cookie, or a short-lived access token in memory plus a refresh token in an `HttpOnly` cookie. Also: `frame-ancestors 'none'` against clickjacking, `rel="noopener"` on `_blank` links, Subresource Integrity on CDN scripts, no secrets in bundles. More: [Part 33](33-frontend-security.md).
+
+---
+
+<a name="s32"></a>
+# 32. Async Iteration
+
+### What is `for await...of`, and when do you use it?
+
+It loops over an **async iterable** — something that produces many values over time, where each `next()` returns a promise. Uses: pages of an API, chunks of a `fetch` response stream (`for await (const chunk of res.body)`), socket messages. It's sequential — for a fixed set of independent requests, `Promise.all` is faster.
+
+### How would you load all pages of a paginated API?
+
+An `async function*` that fetches a page with the current cursor, `yield*`s its items, and moves to the next cursor until there is none. The caller writes `for await (const user of fetchAllUsers())`. It's lazy — `break` after ten users means only one request — and the generator's `finally` block runs on `break`, so cleanup goes there. More: [Part 34](34-async-iteration.md).
+
+---
+
+<a name="s33"></a>
+# 33. Build Tooling
+
+### Transpiling vs polyfilling?
+
+**Transpiling** rewrites new **syntax** (`?.`, class fields) into older syntax at build time — Babel, TypeScript, esbuild, SWC. **Polyfilling** adds missing **built-in functions** at runtime (`Array.prototype.at`, `structuredClone`) — `core-js`. "Grammar rewritten vs vocabulary added." A transpiler can't add `structuredClone`; a polyfill can't teach old browsers `?.`. Targets come from browserslist.
+
+### What is tree-shaking, and what breaks it?
+
+Dropping unused exports from the bundle — only possible because ESM imports are static. Broken by CommonJS packages, `import *` used dynamically, top-level side effects, big barrel files, `obj[name]` access. Fix: ES-module packages (`lodash-es/debounce`), named imports, `"sideEffects": false` in libraries.
+
+### How do you shrink a large bundle?
+
+Measure with a bundle visualizer, then: route-level code splitting with `import()`, lazy-load heavy widgets, replace or partially import big libraries, fix tree-shaking blockers, remove duplicate versions, target modern browsers, optimise images/fonts, and add a size budget in CI.
+
+### Why do build outputs have hashes in file names?
+
+The hash comes from the file's content, so a changed file gets a new name and browsers download it, while unchanged files stay cached — so assets can be cached for a year (`immutable`), and only `index.html` is `no-cache`. Deleting old chunks right after a deploy causes "Failed to fetch dynamically imported module" for users still on the old page — keep old assets for a while and reload on that error. More: [Part 35](35-build-tooling.md).
+
+---
+
 ## Before an interview
 
 ```
@@ -988,6 +1184,8 @@ Each `cluster` worker is a full separate OS process — genuinely full core util
 2. Stumble → open the linked Part, reread that section only.
 3. Highest yield: 2 (closures), 4 (this), 9 (prototypes), 11 (event loop),
    12 (promises), 20 (polyfills), 25 (workers).
+   For a 3–4 years front-end role add: 28 (events), 30 (rendering, async/defer, Web Vitals),
+   31 (security), and the output drills in Part 24 (52 of them).
 4. If you have one hour: closures + the var-loop bug, the four this-binding rules,
    microtask-vs-macrotask ordering, and why Promise.all fails fast. Those four
    carry most JS interviews.

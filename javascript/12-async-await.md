@@ -57,6 +57,40 @@ async function fetchUserSafe(id) {
 ```
 **The trap:** `try`/`catch` only catches a rejection if you actually `await` the promise inside it. `try { fetchUser(id); } catch (err) {}` (no `await`) catches nothing — the promise rejects asynchronously, long after the synchronous `try` block has already finished, and becomes an unhandled rejection instead.
 
+### ⚠️ `return` vs `return await` inside `try`
+
+```js
+async function getUser() {
+  try {
+    return fetchUser();          // ❌ returns the promise; if it rejects LATER, this catch never sees it
+  } catch (err) {
+    return null;
+  }
+}
+
+async function getUserSafe() {
+  try {
+    return await fetchUser();    // ✅ waits here, so a rejection is thrown INSIDE the try → caught
+  } catch (err) {
+    return null;
+  }
+}
+```
+
+Outside a `try/catch`, `return promise` and `return await promise` behave the same for the caller. **Inside `try`, use `return await`** — otherwise the `catch` is useless. (`return await` also keeps the function in async stack traces, which helps debugging.)
+
+> 🧠 **Remember:** "inside `try`, **return await**."
+
+### Starting work early, awaiting later
+
+```js
+const userPromise = fetchUser();      // both requests start NOW
+const ordersPromise = fetchOrders();
+const user = await userPromise;       // then wait for each
+const orders = await ordersPromise;   // ⚠️ if ordersPromise rejects while we wait for user,
+                                      //    it can be reported as unhandled first — prefer Promise.all
+```
+
 ## 4. Sequential vs Parallel `await`
 
 > **Definition:** sequential `await` runs each asynchronous step **only after** the previous one finishes, even when the steps don't actually depend on each other — parallel execution starts all the independent promises **at once** and awaits them together, so total time is the slowest one, not the sum of all of them.
@@ -114,6 +148,9 @@ Not available in CommonJS or plain scripts — only inside a genuine ES module (
 
 **Q: Why does a `try`/`catch` around a promise-returning call without `await` catch nothing?**
 > Because the `try` block only catches synchronous throws (or an awaited rejection turned into a throw). A promise rejects asynchronously — by the time it actually rejects, the synchronous `try` block has already finished executing and there's nothing left listening for the exception; it becomes an unhandled promise rejection instead.
+
+**Q: `return fetchUser()` vs `return await fetchUser()` inside a `try` — does it matter?**
+> Yes. Without `await`, the function returns the promise immediately and leaves the `try` block, so if the promise rejects later, the `catch` never runs. With `return await`, the rejection happens while still inside the `try` and is caught. Outside `try/catch` the two are effectively the same.
 
 **Q: Predict:**
 ```js

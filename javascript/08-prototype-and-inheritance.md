@@ -81,7 +81,13 @@ class Dog2 extends Animal2 {
   constructor(name, breed) { super(name); this.breed = breed; }
 }
 ```
-This compiles to *exactly* the constructor-function pattern above: `speak` lands on `Animal2.prototype`, `extends` sets up the `Object.create`-style chain, and `super(name)` is literally `Animal2.call(this, name)`. **`class` is syntax, not a new inheritance model** — it just hides the boilerplate and adds guardrails (can't call a class constructor without `new`, methods are non-enumerable by default, TDZ for the class binding). Full depth in [Part 09](09-classes.md).
+This is *mostly* the constructor-function pattern above: `speak` lands on `Animal2.prototype`, and `extends` sets up the same prototype chain. **`class` is mostly syntax, not a new inheritance model.** It also adds guardrails: you can't call a class constructor without `new`, methods are non-enumerable, and the class name has a TDZ.
+
+**One real difference — who creates `this`:**
+- Old pattern: `new Dog()` creates the object first, then `Animal.call(this, name)` decorates it.
+- `class Dog extends Animal`: **`this` doesn't exist until `super(name)` runs — the *parent* constructor creates it.**
+
+That's why `class MyArray extends Array {}` and `class HttpError extends Error {}` work properly (you get a real array with a working `.length`, a real error with a stack), while the old `Array.call(this)` trick never could. So say "`super()` is *like* `Parent.call(this)`," not "literally." Full depth in [Part 09](09-classes.md).
 
 ## 6. `Object.create(null)`
 
@@ -99,7 +105,7 @@ Use case: an object meant purely as a key-value dictionary, where you never want
 > The engine checks the object's own properties first. If not found, it follows the object's internal `[[Prototype]]` link to the next object up and checks there, repeating until it either finds the property or reaches `null` (the end of every chain, past `Object.prototype`), at which point it returns `undefined`.
 
 **Q: Why is `class` "just" syntax over what constructor functions already did?**
-> Because it compiles down to exactly the same mechanism — methods still land on `.prototype`, `extends` still sets up an `Object.create`-based chain, `super()` is still just calling the parent constructor against the new `this`. `class` doesn't introduce a new inheritance model; it standardizes the syntax and adds safety (TDZ, can't call without `new`, non-enumerable methods).
+> Because it uses the same mechanism — methods still land on `.prototype`, and `extends` still links prototypes. `class` standardizes the syntax and adds safety (TDZ, can't call without `new`, non-enumerable methods). The one real difference: in a derived class, the **parent constructor creates `this`** during `super()`, which is what makes extending built-ins like `Array` and `Error` work.
 
 **Q: `Object.create(null)` and why would you want it?**
 > It creates an object with no prototype at all — not even `Object.prototype` — so there's zero risk of a data key colliding with an inherited method name like `toString` or `constructor`, and no inherited baggage. Useful for objects used strictly as dictionaries, though `Map` usually wins today.

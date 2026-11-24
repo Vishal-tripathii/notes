@@ -99,6 +99,35 @@ isValid &&= checkExtra();   // assign ONLY if isValid is currently truthy — sk
 
 Fully covered in [Part 12 §5](12-async-await.md#5-top-level-await) — `await` usable directly at an ES module's top level (not inside any function), pausing that module's (and its importers') execution until the promise settles.
 
+## 9. Newer additions (ES2022 – ES2025) worth knowing by name
+
+| Feature | Year | What it does |
+|---|---|---|
+| `arr.at(-1)`, `Object.hasOwn`, `#private`, `static {}` blocks, top-level `await`, `Error({ cause })` | ES2022 | covered above / [Part 09](09-classes.md) / [Part 13](13-error-handling.md) |
+| `toSorted`, `toReversed`, `toSpliced`, `with`, `findLast`, `findLastIndex` | ES2023 | copying array methods — [Part 05 §1](05-arrays.md) |
+| `Object.groupBy`, `Map.groupBy` | ES2024 | group an array by a key |
+| `Promise.withResolvers()` | ES2024 | `{ promise, resolve, reject }` — [Part 11](11-promises.md) |
+| `Array.fromAsync()` | recent (check support) | collect an async iterable into an array — [Part 34](34-async-iteration.md) |
+| `str.isWellFormed()`, `toWellFormed()` | ES2024 | detect broken surrogate pairs in strings |
+| **Set methods**: `union`, `intersection`, `difference`, `symmetricDifference`, `isSubsetOf`… | ES2025 | real set maths without loops |
+| **Iterator helpers**: `iterator.map/filter/take/drop/toArray` | ES2025 | lazy array-like methods on any iterator — [Part 14](14-generators-and-iterators.md) |
+| `Promise.try(fn)` | ES2025 | run a function and always get a promise, even if it throws synchronously |
+| `RegExp.escape(str)` | ES2026 (newly standard) | safely put user text into a regex |
+
+```js
+const a = new Set([1, 2, 3]), b = new Set([2, 3, 4]);
+a.intersection(b);   // Set {2, 3}
+a.union(b);          // Set {1, 2, 3, 4}
+a.difference(b);     // Set {1}
+
+function* naturals() { let n = 1; while (true) yield n++; }
+naturals().filter(n => n % 2 === 0).map(n => n * n).take(3).toArray();   // [4, 16, 36] — lazy, no infinite loop
+```
+
+**Still a proposal (don't claim it's standard):** `Temporal` — a modern date/time API replacing `Date`, shipping in some browsers ([Part 28 §5](28-numbers-and-dates.md)). Decorators — used by Angular/TypeScript, standardisation in progress.
+
+Check support with MDN / caniuse before relying on the newest ones in browsers, or let your build tool polyfill them ([Part 35](35-build-tooling.md)).
+
 ---
 
 ## Interview Q&A

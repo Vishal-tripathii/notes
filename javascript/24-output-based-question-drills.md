@@ -90,7 +90,7 @@ const obj = {
 };
 console.log(obj.regular(), obj.arrow());
 ```
-> `'V' undefined` — the arrow captured `this` from outside the object literal entirely, never `obj`.
+> `'V'`, then it **depends on where the code runs**: in an ES module it **throws** (outer `this` is `undefined`); in an old browser script it's `''` (`window.name`); in a Node CommonJS file it's `undefined`. The key idea: the arrow captured `this` from *outside* the object literal, never `obj`. Full table: [Part 03](03-this-call-apply-bind.md).
 
 ---
 
@@ -103,7 +103,7 @@ console.log([] + {});
 console.log({} + []);
 console.log(1 + '1' - 1);
 ```
-> `''`, `'[object Object]'`, `0` or `'[object Object]'` (depends on statement-vs-expression parsing of the leading `{}`), `10` — `1 + '1'` is `'11'` (string concat), then `'11' - 1` is `10` (numeric).
+> `''`, `'[object Object]'`, `'[object Object]'`, `10`. Inside `console.log(...)` the `{}` is always an object (it's an argument, so an expression). The famous `{} + [] → 0` only happens when you type it **alone** at the start of a line in a console: then `{}` is read as an empty *block*, and what's left is `+[]` → `0`. And `1 + '1'` is `'11'` (string concat), then `'11' - 1` is `10` (numeric).
 
 **10.**
 ```js
@@ -225,7 +225,7 @@ obj.a = 99;
 obj.nested.b = 99;
 console.log(obj.a, obj.nested.b);
 ```
-> `1 99` — freeze is shallow; the nested object's own properties are untouched.
+> Non-strict script: `1 99` — the write to `a` is silently ignored; freeze is shallow, so `nested.b` changes. **Strict mode** (ES modules, classes): `obj.a = 99` throws a `TypeError` and nothing is logged.
 
 **21.**
 ```js
@@ -292,7 +292,261 @@ console.log(it.next());
 
 ---
 
-*(Target: 50+. Currently 25 — add more as each part surfaces a good candidate, prioritizing Parts 10–12 and Part 01 per the roadmap's guidance.)*
+---
+
+## I. Promises — the details ([Part 11](11-promises.md))
+
+**26.**
+```js
+console.log('A');
+new Promise(res => { console.log('B'); res(); console.log('C'); })
+  .then(() => console.log('D'));
+console.log('E');
+```
+> `A, B, C, E, D` — the executor runs **synchronously** during `new Promise`, and `res()` doesn't stop it (`C` still prints). Only `.then` is async.
+
+**27.**
+```js
+Promise.resolve(1).finally(() => 2).then(v => console.log(v));
+```
+> `1` — `finally` passes the original value through; its own return value is ignored.
+
+**28.**
+```js
+Promise.resolve(1).then(2).then(v => console.log(v));
+```
+> `1` — `.then()` with something that isn't a function is ignored; the value passes straight through.
+
+**29.**
+```js
+const p = new Promise((res, rej) => { res('first'); rej('second'); res('third'); });
+p.then(console.log, console.log);
+```
+> `'first'` — a promise settles once; later `resolve`/`reject` calls are ignored.
+
+**30.**
+```js
+async function f() { return 1; }
+console.log(f());
+```
+> A **promise**, not `1` — browser console shows `Promise {<fulfilled>: 1}`, Node shows `Promise { 1 }`. An `async` function always returns a promise.
+
+**31.**
+```js
+Promise.any([Promise.reject(1), Promise.reject(2)])
+  .catch(e => console.log(e.constructor.name, e.errors));
+```
+> `AggregateError [1, 2]` — `any` only rejects when **all** reject, collecting every reason.
+
+**32.**
+```js
+Promise.race([
+  new Promise(r => setTimeout(() => r('slow'), 100)),
+  Promise.resolve('fast'),
+]).then(console.log);
+```
+> `'fast'` — `race` takes the first to settle. (The slow timer still runs; `race` doesn't cancel it.)
+
+---
+
+## J. Event loop — harder ones ([Part 10](10-event-loop-and-concurrency-model.md), [Part 12](12-async-await.md))
+
+**33.**
+```js
+setTimeout(() => console.log('t1'), 0);
+setTimeout(() => {
+  console.log('t2');
+  Promise.resolve().then(() => console.log('p inside t2'));
+}, 0);
+setTimeout(() => console.log('t3'), 0);
+```
+> `t1, t2, p inside t2, t3` — after **each** macrotask, the microtask queue is drained before the next one. (Same in browsers and Node 11+.)
+
+**34.**
+```js
+async function a() { console.log(1); await Promise.resolve(); console.log(2); }
+async function b() { console.log(3); await a(); console.log(4); }
+b();
+console.log(5);
+```
+> `3, 1, 5, 2, 4` — `b` runs until it calls `a`; `a` runs until its `await`; both pause; `5` is sync. Then `a` resumes (`2`) and finishes, which lets `b` resume (`4`).
+
+**35.**
+```js
+try {
+  setTimeout(() => { throw new Error('boom'); }, 0);
+} catch (e) {
+  console.log('caught');
+}
+console.log('after');
+```
+> `after`, then an **uncaught** `Error: boom` — the `try` finished long before the timer fires. `catch` only catches errors thrown while the `try` block is running.
+
+**36.**
+```js
+const results = [];
+[1, 2, 3].forEach(async (n) => { await null; results.push(n); });
+console.log(results);
+```
+> `[]` — `forEach` doesn't wait for async callbacks; the pushes happen later as microtasks. Use `for...of` with `await`, or `await Promise.all(arr.map(...))`.
+
+**37.**
+```js
+for (var i = 0; i < 3; i++) setTimeout(console.log, 0, i);
+```
+> `0, 1, 2` — trick question! The extra arguments to `setTimeout` are evaluated **when `setTimeout` is called**, so each timer gets the value of `i` at that moment. No closure is involved.
+
+---
+
+## K. `this`, scope & hoisting — harder ones ([Parts 00, 01, 03](03-this-call-apply-bind.md))
+
+**38.**
+```js
+const obj = {
+  count: 10,
+  start()      { setTimeout(function () { console.log(this.count); }, 0); },
+  startArrow() { setTimeout(() => console.log(this.count), 0); },
+};
+obj.start();
+obj.startArrow();
+```
+> `undefined`, then `10` — a regular function callback gets the timer's own `this` (`window` in browsers, a `Timeout` object in Node), neither has `count`. The arrow keeps `obj` from `startArrow`.
+
+**39.**
+```js
+function f() { return this.x; }
+const g = f.bind({ x: 1 }).bind({ x: 2 });
+console.log(g());
+```
+> `1` — a bound function's `this` is fixed forever; binding it again can't change it.
+
+**40.**
+```js
+class A {
+  name = 'A';
+  arrow = () => this.name;
+  method() { return this.name; }
+}
+const { arrow, method } = new A();
+console.log(arrow());
+console.log(method());
+```
+> `'A'`, then **`TypeError`** — the arrow class field captured `this` when the instance was created. `method` lives on the prototype; detached, it's called with no receiver, and class code is strict, so `this` is `undefined`.
+
+**41.**
+```js
+let x = 1;
+{
+  console.log(x);
+  let x = 2;
+}
+```
+> `ReferenceError` — the inner `let x` exists for the whole block (hoisted) but is in the TDZ at the `console.log`. It does **not** fall back to the outer `x = 1`.
+
+**42.**
+```js
+var a = 1;
+function f() {
+  console.log(a);
+  var a = 2;
+}
+f();
+```
+> `undefined` — the inner `var a` is hoisted to the top of `f`, shadowing the outer `a`, but its value isn't assigned yet.
+
+---
+
+## L. Numbers & coercion ([Parts 28–29](28-numbers-and-dates.md))
+
+**43.**
+```js
+console.log([10, 1, 2].sort());
+```
+> `[1, 10, 2]` — default `sort` compares as **strings**. Use `(a, b) => a - b`.
+
+**44.**
+```js
+console.log(['1', '2', '3'].map(parseInt));
+```
+> `[1, NaN, NaN]` — `map` passes `(value, index)`, so it's `parseInt('2', 1)` and `parseInt('3', 2)`.
+
+**45.**
+```js
+console.log(0.1 + 0.2 === 0.3, 0.1 + 0.2);
+```
+> `false 0.30000000000000004` — binary floating point.
+
+**46.**
+```js
+console.log([] == ![], null == 0, null >= 0);
+```
+> `true false true` — `![]` is `false` → `[] == false` → `'' == 0` → true. `null` only `==` `undefined`. But `>=` converts `null` to `0`.
+
+**47.**
+```js
+console.log(typeof NaN, NaN === NaN, Number.isNaN('abc'), isNaN('abc'));
+```
+> `'number' false false true` — global `isNaN` converts first; `Number.isNaN` doesn't.
+
+**48.**
+```js
+console.log('5' + 3, '5' - 3, '5' * '2', true + 1, [1, 2] + [3]);
+```
+> `'53' 2 10 2 '1,23'` — `+` with a string joins; other maths operators convert to numbers; arrays become strings.
+
+---
+
+## M. Objects & references ([Part 04](04-objects.md))
+
+**49.**
+```js
+const a = { x: 1 };
+const b = { ...a, nested: { y: 1 } };
+const c = { ...b };
+c.nested.y = 2;
+c.x = 3;
+console.log(a.x, b.x, b.nested.y);
+```
+> `1 1 2` — spread is shallow: `c.x` is its own copy, but `c.nested` is the *same* object as `b.nested`.
+
+**50.**
+```js
+const k1 = { id: 1 }, k2 = { id: 2 };
+const obj = {};
+obj[k1] = 'a';
+obj[k2] = 'b';
+console.log(obj[k1], Object.keys(obj));
+```
+> `'b' ['[object Object]']` — plain-object keys are strings, so both objects become the key `'[object Object]'`. Use a `Map` for object keys ([Part 15](15-map-set-weakmap-weakset.md)).
+
+**51.**
+```js
+const arr = [1, 2, 3];
+arr.length = 1;
+console.log(arr, arr[2]);
+```
+> `[1] undefined` — setting `length` smaller deletes the extra elements.
+
+---
+
+## N. Generators ([Part 14](14-generators-and-iterators.md))
+
+**52.**
+```js
+function* g() {
+  const x = yield 1;
+  console.log('got', x);
+  yield x * 2;
+}
+const it = g();
+console.log(it.next().value);
+console.log(it.next(5).value);
+```
+> `1`, then `got 5`, then `10` — the value passed to `next(5)` becomes the result of the paused `yield` expression. (The first `next()`'s argument is always ignored.)
+
+---
+
+*(52 questions — target reached. Keep adding real ones from interviews, especially for Parts 10–12.)*
 
 ---
 

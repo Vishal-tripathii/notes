@@ -24,6 +24,8 @@ el.remove();                                          // modern, no parentNode.r
 ```
 **`textContent` vs `innerHTML`:** `textContent` sets literal text, safe against injecting markup/scripts. `innerHTML` parses its argument as HTML — assigning untrusted user input directly to `innerHTML` is a classic XSS vector.
 
+> ⚠️ Detail people get wrong: a `<script>` tag inserted via `innerHTML` does **not** run. The real danger is HTML that runs code *without* a script tag: `<img src="x" onerror="stealCookies()">`, `<a href="javascript:...">`, `<svg onload=...>`. More in [Part 33](33-frontend-security.md).
+
 ## 2. Event Bubbling and Capturing
 
 > **Definition — Bubbling:** after an event fires on its target element, it propagates **upward** through each ancestor in turn (target → parent → grandparent → ... → document) — the default phase most listeners run in.
@@ -61,6 +63,8 @@ document.querySelector('.list').addEventListener('click', (event) => {
 - **"Just works" for dynamically added elements:** a new `.list-item` appended later is automatically covered, with zero extra code, since the listener lives on the stable parent, not the (possibly newly-created) child.
 - **Simpler cleanup:** removing the list wholesale removes the single listener with it, instead of having to individually track and remove N listeners to avoid leaking them.
 
+(More event controls — `target` vs `currentTarget`, `preventDefault` vs `stopPropagation`, events that don't bubble like `focus` — are in [Part 30](30-events-in-depth.md).)
+
 `event.target.closest(selector)` is the key piece — the actual element clicked might be a `<span>` or `<svg>` nested *inside* the list item, not the list item itself, and `closest()` walks up from there to find the nearest ancestor (or self) matching the selector.
 
 ---
@@ -74,7 +78,7 @@ document.querySelector('.list').addEventListener('click', (event) => {
 > An event travels down from the document to the target first (capturing), then back up from the target to the document (bubbling) — most listeners run in the bubble phase by default. The third argument (a boolean, or an options object with `capture`) lets a listener opt into running during the capture phase instead, which is occasionally needed to intercept an event before a descendant's own handler runs, or to implement things like modal "click outside to close" logic reliably.
 
 **Q: `textContent` vs `innerHTML` — when does the difference actually matter?**
-> `textContent` always treats its argument as literal text; `innerHTML` parses it as HTML markup. It matters the moment untrusted or user-supplied content is involved — assigning it to `innerHTML` directly is a classic XSS vector, since any embedded `<script>` or event-handler attribute gets parsed and can execute. `textContent` is the safe default unless you specifically need to render markup, and even then it should go through a sanitizer first.
+> `textContent` always treats its argument as literal text; `innerHTML` parses it as HTML markup. It matters the moment untrusted or user-supplied content is involved — assigning it to `innerHTML` directly is a classic XSS vector. (A `<script>` tag added this way won't run, but event-handler attributes like `<img src=x onerror="...">` will.) `textContent` is the safe default unless you specifically need to render markup, and even then it should go through a sanitizer first.
 
 **Q: Predict what logs, and in what order.**
 ```js

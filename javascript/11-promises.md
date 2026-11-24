@@ -16,6 +16,25 @@ const p = new Promise((resolve, reject) => {
 });
 ```
 
+### ⚠️ The executor runs **immediately and synchronously**
+
+The function you pass to `new Promise(...)` (the *executor*) runs **right away**, during the `new Promise` call — it is not delayed. Only the `.then` callbacks are async.
+
+```js
+console.log('A');
+new Promise((resolve) => {
+  console.log('B');        // runs NOW, synchronously
+  resolve();
+  console.log('C');        // still runs — resolve() doesn't stop the function
+}).then(() => console.log('E'));
+console.log('D');
+// A, B, C, D, E
+```
+
+Two things this shows: the executor is synchronous (`B` before `D`), and `resolve()` is not a `return` (`C` still prints). If the executor **throws**, the promise is rejected — the error doesn't escape.
+
+> 🧠 **Remember:** "the **inside** of `new Promise` runs now; the **`.then`** runs later."
+
 **Why "only settles once" matters:** calling `resolve()` a second time, or `resolve()` then `reject()`, is silently a no-op — the first call wins permanently. This guarantee is what makes `.then()` reliable: a callback attached to a promise fires exactly once, ever, with a value that can never be "changed out from under it" later.
 
 ## 2. Chaining
@@ -53,6 +72,28 @@ fetchData()
   .catch(showError)
   .finally(hideSpinner); // runs whether fetchData succeeded or failed
 ```
+
+### `.finally()` details that show up in output questions
+
+- It receives **no argument**, and it **passes the original result through** unchanged: `Promise.resolve(1).finally(() => 99).then(v => console.log(v))` logs **`1`**, not `99`.
+- But if the `finally` callback **throws** (or returns a rejected promise), that error **replaces** the result.
+
+### More rules worth knowing
+
+- **`.then(nonFunction)` is ignored** — the value passes through: `Promise.resolve(1).then(2).then(v => console.log(v))` logs `1`.
+- **Thenables:** `resolve()` / `await` accept any object with a `.then` method and adopt its result — that's how promises from different libraries work together.
+- **Resolving with a promise adds extra microtask ticks** — `resolve(otherPromise)` waits for `otherPromise`, which is why some output questions look "one step late."
+- **Unhandled rejections** — a rejected promise with no `.catch` anywhere. In browsers it fires the `unhandledrejection` event on `window` (log it to your error tracker); in Node it crashes the process by default.
+  ```js
+  window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
+  ```
+- **`Promise.race` doesn't cancel the losers.** The timeout pattern below stops *waiting*, but the slow request keeps running — cancel it for real with `AbortController` ([Part 20 §4](20-browser-apis.md)).
+- **`Promise.withResolvers()`** (ES2024) gives you `{ promise, resolve, reject }` without the executor boilerplate — handy when resolve is called from somewhere else (an event, a callback).
+  ```js
+  const { promise, resolve } = Promise.withResolvers();
+  socket.once('ready', resolve);
+  await promise;
+  ```
 
 ## 5. `Promise.all` vs `allSettled` vs `race` vs `any`
 
@@ -112,6 +153,12 @@ Checks: results are placed by index (`results[i]`), not push order, since promis
 
 **Q: Why does a promise chain each return a NEW promise rather than reusing the same one?**
 > Because `.then()`'s job is to produce the *next* value in the chain, which depends on what the callback returns — a plain value, a thrown error, or another promise to wait on. That can't be represented by mutating the original promise (which is already settled and immutable), so a fresh promise is created to represent that next step.
+
+**Q: Does the function passed to `new Promise` run synchronously?**
+> Yes. The executor runs immediately during the `new Promise` call. Only the `.then`/`.catch` callbacks are scheduled later as microtasks. And `resolve()` doesn't stop the executor — code after it still runs.
+
+**Q: What does `.finally()` return?**
+> A promise with the *original* outcome — `finally`'s own return value is ignored. The exception is if the `finally` callback throws or returns a rejected promise; then that rejection replaces the result.
 
 **Q: Predict:**
 ```js

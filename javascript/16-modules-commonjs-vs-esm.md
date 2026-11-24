@@ -46,7 +46,7 @@ console.log(add(2, 3), multiply(2, 3));
 | `this` at module top level | `module.exports` | `undefined` |
 | File extension convention (Node) | `.js` (default) or `.cjs` | `.mjs`, or `.js` with `"type": "module"` in `package.json` |
 
-**Where the mixing breaks down:** Node lets you `require()` a CommonJS module from ESM in many cases, but `import`ing a CommonJS module into ESM only gets you its `module.exports` as a single default-like object (no proper named exports unless Node can statically analyze them), and you generally **cannot** `require()` a genuine ESM module synchronously at all — ESM's async nature is fundamentally incompatible with `require()`'s synchronous contract.
+**Where the mixing breaks down:** Node lets you `require()` a CommonJS module from ESM in many cases, but `import`ing a CommonJS module into ESM only gets you its `module.exports` as a single default-like object (no proper named exports unless Node can statically analyze them), and on older Node you **cannot** `require()` a genuine ESM module (`ERR_REQUIRE_ESM`), because ESM loading can be asynchronous and `require()` is synchronous. **Since Node 22.12 / 20.19, `require()` of an ES module works — as long as that module (and what it imports) has no top-level `await`.** Dynamic `import()` works everywhere and is still the safe choice for libraries.
 
 ## 4. Named vs Default Exports
 

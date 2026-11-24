@@ -2,7 +2,7 @@
 
 ## Coding & Machine Coding Round ⭐⭐⭐⭐⭐
 
-> **Implement from scratch:** Deep Clone · Flatten Array · Flatten Object · Event Emitter · Pub/Sub · LRU Cache · Promise Pool.
+> **Implement from scratch:** Deep Clone · Flatten Array · Flatten Object · Event Emitter · Pub/Sub · LRU Cache · Promise Pool · 🆕 Deep Equal · `get`/`set` by path · `allSettled`/`race`/`any` polyfills · `sleep`/`withTimeout` · interval from `setTimeout` · debounce with `cancel`/`flush` · Autocomplete · async memoize.
 >
 > 📁 `work/LRUCache.js` and `work/LRUCache_DLL.js` already exist in this repo (a `Map`-based first pass and a stub for the doubly-linked-list version) — reviewed and refactored into §5 below rather than starting from zero, per the roadmap's note.
 
@@ -179,9 +179,222 @@ promisePool(tasks, 5);                                                   // must
 ```
 **The critical detail:** `tasks` must be an array of **functions that return promises**, not already-started promises — passing already-started promises would mean all of them began running immediately regardless of any "pool," defeating the entire point. `nextIndex++` claims a slot synchronously before the `await`, so two workers can never race to claim the same index even though they're running "concurrently" (there's no real parallelism within a single JS thread — see [Part 10](10-event-loop-and-concurrency-model.md)).
 
+## 7. Deep Equal
+
+> **Task:** `deepEqual(a, b)` — true if two values have the same structure and contents.
+
+```js
+function deepEqual(a, b) {
+  if (Object.is(a, b)) return true;                        // same primitive / same reference / NaN
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
+
+  const keysA = Object.keys(a), keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(k => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));
+}
+deepEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] });   // true
+deepEqual({ a: 1 }, { a: 1, b: undefined });            // false — different keys
+```
+
+Say the edge cases out loud: `NaN`, `Date`s, arrays vs objects, key counts, and (for extra credit) `Map`/`Set` and circular references (track visited pairs in a `WeakMap`).
+
+## 8. `get` / `set` by path
+
+> **Task:** `get(obj, 'a.b[0].c', defaultValue)` like lodash.
+
+```js
+const toPath = (path) => path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+
+function get(obj, path, defaultValue) {
+  let cur = obj;
+  for (const key of toPath(path)) {
+    if (cur == null) return defaultValue;
+    cur = cur[key];
+  }
+  return cur === undefined ? defaultValue : cur;
+}
+
+function set(obj, path, value) {
+  const keys = toPath(path);
+  let cur = obj;
+  keys.slice(0, -1).forEach((key, i) => {
+    if (cur[key] == null) cur[key] = /^\d+$/.test(keys[i + 1]) ? [] : {};   // create array or object
+    cur = cur[key];
+  });
+  cur[keys.at(-1)] = value;
+  return obj;
+}
+
+get({ a: { b: [{ c: 42 }] } }, 'a.b[0].c');     // 42
+get({}, 'x.y', 'none');                         // 'none'
+set({}, 'a.list[0].name', 'V');                 // { a: { list: [ { name: 'V' } ] } }
+```
+
+(In real code, guard against `__proto__` keys — [nodejs Part 7.5 §1](../nodejs/07.5-security-beyond-auth.md).)
+
+## 9. `Promise.allSettled`, `Promise.race`, `Promise.any` polyfills
+
+```js
+function allSettled(promises) {
+  return Promise.all(promises.map(p =>
+    Promise.resolve(p).then(
+      value  => ({ status: 'fulfilled', value }),
+      reason => ({ status: 'rejected', reason }),
+    )
+  ));
+}
+
+function race(promises) {
+  return new Promise((resolve, reject) => {
+    for (const p of promises) Promise.resolve(p).then(resolve, reject);   // first to settle wins
+  });
+}
+
+function any(promises) {
+  return new Promise((resolve, reject) => {
+    const errors = [];
+    let rejected = 0;
+    if (promises.length === 0) return reject(new AggregateError([], 'All promises were rejected'));
+    promises.forEach((p, i) => {
+      Promise.resolve(p).then(resolve, (err) => {
+        errors[i] = err;
+        if (++rejected === promises.length) reject(new AggregateError(errors, 'All promises were rejected'));
+      });
+    });
+  });
+}
+```
+
+Key points: `Promise.resolve(p)` lets plain values work too; `allSettled` never rejects; `race` with an empty array stays pending forever (that's the real behaviour); `any` keeps errors in input order.
+
+## 10. `sleep` and `withTimeout`
+
+```js
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));   // don't leave the timer running
+}
+
+await withTimeout(fetch('/slow'), 3000);
+```
+
+Mention: this stops **waiting**, but doesn't stop the request. To really cancel a fetch, pass `signal: AbortSignal.timeout(3000)`.
+
+## 11. `setInterval` built from `setTimeout`
+
+> **Why:** `setInterval` fires on schedule even if the previous run (say, an API poll) hasn't finished, so runs can pile up. A chained `setTimeout` waits for each run to finish first.
+
+```js
+function interval(fn, ms) {
+  let timer, stopped = false;
+  async function tick() {
+    await fn();                                // wait for this run to finish
+    if (!stopped) timer = setTimeout(tick, ms);
+  }
+  timer = setTimeout(tick, ms);
+  return () => { stopped = true; clearTimeout(timer); };   // stop function
+}
+
+const stop = interval(() => fetch('/api/status'), 5000);
+// later: stop();
+```
+
+## 12. Debounce with `cancel` and `flush`
+
+```js
+function debounce(fn, wait) {
+  let timer = null, lastArgs, lastThis;
+  function debounced(...args) {
+    lastArgs = args; lastThis = this;
+    clearTimeout(timer);
+    timer = setTimeout(() => { timer = null; fn.apply(lastThis, lastArgs); }, wait);
+  }
+  debounced.cancel = () => { clearTimeout(timer); timer = null; };           // drop the pending call
+  debounced.flush = () => {                                                  // run it NOW
+    if (timer) { clearTimeout(timer); timer = null; fn.apply(lastThis, lastArgs); }
+  };
+  return debounced;
+}
+
+const save = debounce(saveDraft, 1000);
+window.addEventListener('beforeunload', () => save.flush());   // don't lose the last edit
+// on component destroy: save.cancel();
+```
+
+## 13. ⭐ Autocomplete / search-as-you-type (the classic UI round)
+
+Requirements interviewers check: debounce input, cancel stale requests, ignore out-of-order responses, handle errors and empty input, keyboard navigation, accessibility.
+
+```js
+function setupAutocomplete(input, list) {
+  let controller = null;
+
+  const search = debounce(async (query) => {
+    controller?.abort();                         // cancel the previous request
+    if (!query.trim()) { list.replaceChildren(); return; }
+    controller = new AbortController();
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      render(await res.json());
+    } catch (err) {
+      if (err.name !== 'AbortError') showError(err);   // aborts are expected, not errors
+    }
+  }, 300);
+
+  input.addEventListener('input', (e) => search(e.target.value));
+
+  function render(items) {
+    list.replaceChildren(...items.map((item) => {
+      const li = document.createElement('li');
+      li.textContent = item.label;                // textContent — never innerHTML with API data (Part 33)
+      li.setAttribute('role', 'option');
+      return li;
+    }));
+  }
+}
+```
+
+Talk through the extras: caching previous queries in a `Map`, highlighting the match safely, arrow-key navigation with `aria-activedescendant`, a minimum query length, and showing "no results" vs "error."
+
+## 14. Async memoize with in-flight de-duplication
+
+> **Task:** if three components ask for `getUser(7)` at the same moment, make only **one** request.
+
+```js
+function memoizeAsync(fn) {
+  const cache = new Map();                       // key → PROMISE (not the value)
+  return (key) => {
+    if (!cache.has(key)) {
+      const p = fn(key).catch((err) => { cache.delete(key); throw err; });   // don't cache failures
+      cache.set(key, p);
+    }
+    return cache.get(key);
+  };
+}
+
+const getUser = memoizeAsync((id) => fetch(`/api/users/${id}`).then(r => r.json()));
+await Promise.all([getUser(7), getUser(7), getUser(7)]);   // one network request
+```
+
+Storing the **promise** is the trick — callers that arrive while it's still loading share it. Add a TTL or size limit for real use.
+
 ---
 
 ## Interview Q&A
+
+**Q: How do you stop old search responses from overwriting newer results?**
+> Debounce the input, abort the previous request with an `AbortController` before starting a new one, and ignore `AbortError`s. If cancelling isn't possible, tag each request with an increasing id and only render the response whose id matches the latest.
+
+**Q: Why build an interval out of `setTimeout`?**
+> `setInterval` fires on a fixed schedule even if the previous run hasn't finished, so slow async work piles up. Scheduling the next `setTimeout` after each run finishes guarantees runs never overlap.
 
 **Q: Why does the `Map`-based LRU cache achieve O(1) without a manual linked list?**
 > Because `Map` guarantees iteration in insertion order, and deleting then re-inserting a key moves it to the end of that order — which is exactly the "mark as most recently used" operation an LRU cache needs, and both `delete` and `set` are themselves O(1). The insertion-order guarantee is doing the linked-list's job implicitly.

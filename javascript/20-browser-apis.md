@@ -84,9 +84,56 @@ url.searchParams.set('page', '3');
 url.searchParams.has('sort');            // false
 ```
 
+## 6. Storage limits, `IndexedDB`, and syncing tabs
+
+**Web Storage limits:** about **5 MB per origin**, strings only, and **synchronous** — every read/write blocks the main thread, so don't store big blobs there. Writing past the limit throws `QuotaExceededError`. Also: anything in `localStorage` can be read by any script on the page, so **never store tokens or secrets there** ([Part 33](33-frontend-security.md)).
+
+**`IndexedDB`** — a real database in the browser: asynchronous, stores structured objects and files (Blobs), much larger quotas (often a good share of free disk), indexes and transactions. The raw API is clumsy; use a small wrapper like `idb` or Dexie. Use for offline data, large caches, drafts with attachments.
+
+| | `localStorage` | `sessionStorage` | `IndexedDB` | Cookies |
+|---|---|---|---|---|
+| Size | ~5 MB | ~5 MB | large | ~4 KB each |
+| API | sync | sync | async | string |
+| Sent to the server | no | no | no | **yes, every request** |
+| Lifetime | until cleared | tab | until cleared | expiry date |
+
+**Syncing between tabs:**
+- The **`storage` event** fires in *other* tabs when `localStorage` changes:
+  ```js
+  window.addEventListener('storage', (e) => { if (e.key === 'theme') applyTheme(e.newValue); });
+  ```
+- **`BroadcastChannel`** — a simple message bus between tabs of the same origin:
+  ```js
+  const bc = new BroadcastChannel('auth');
+  bc.postMessage({ type: 'logout' });              // in one tab
+  bc.onmessage = (e) => { if (e.data.type === 'logout') location.href = '/login'; };   // all others
+  ```
+  Classic use: log out in one tab → every tab logs out.
+
+## 7. `postMessage` between windows and iframes — always check the origin
+
+```js
+// sending to an iframe/popup: name the exact target origin, never '*' for sensitive data
+iframe.contentWindow.postMessage({ token }, 'https://widget.example.com');
+
+// receiving: ANY site can send you a message, so check who sent it
+window.addEventListener('message', (e) => {
+  if (e.origin !== 'https://app.example.com') return;   // ✅ ignore strangers
+  handle(e.data);
+});
+```
+
+Forgetting the `origin` check means any website that opens or embeds yours can send it commands.
+
 ---
 
 ## Interview Q&A
+
+**Q: How do you sync state (like logout) across open tabs?**
+> The `storage` event fires in other tabs when `localStorage` changes, and `BroadcastChannel` gives a direct message channel between same-origin tabs. For logout I'd post a message on a `BroadcastChannel` so every tab clears its state and redirects.
+
+**Q: When would you use IndexedDB instead of localStorage?**
+> When the data is large, structured, or binary, or when I don't want to block the main thread — IndexedDB is asynchronous with much bigger quotas. localStorage is fine for small settings like a theme, but it's synchronous, string-only and limited to about 5 MB.
 
 **Q: `localStorage` vs `sessionStorage`, precisely?**
 > Both are synchronous, string-only, origin-scoped Web Storage. `localStorage` has no expiration and is shared across every tab of the same origin. `sessionStorage` is scoped to a single tab's lifetime — cleared when that tab closes, and not visible to other tabs even of the same origin.

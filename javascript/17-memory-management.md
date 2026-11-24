@@ -19,6 +19,8 @@ function example() {
 ```
 This is the mechanical basis for [Part 00's primitive-vs-reference](00-js-fundamentals.md#5-primitive-vs-reference-types) copy semantics: copying a stack value copies the actual bits; copying a heap reference copies the pointer, not the object.
 
+> ⚠️ **"Primitives live on the stack" is a teaching model, not exactly what engines do.** V8 stores strings (and large numbers) on the heap, and any variable captured by a closure is moved to the heap so it can outlive its function ([Part 01 §2](01-scope-and-closures.md)). The part that's always true — and what interviews care about — is the *behaviour*: primitives are copied by value and immutable; objects are shared by reference.
+
 ## 2. Garbage Collection — Reference Counting vs Mark-and-Sweep
 
 > **Definition — Reference counting:** a GC strategy that tracks, per object, how many references point to it; when that count hits zero, the object is immediately reclaimed. Fatal flaw: two objects referencing each other (a **circular reference**) never hit zero even when nothing external reaches either of them, leaking memory forever under pure reference counting.
@@ -63,6 +65,24 @@ function leaky() { accidentalGlobal = 'oops'; } // missing let/const/var — att
                                                     // the global object, lives for the
                                                     // entire lifetime of the page/process
 ```
+
+## 4. `WeakRef` & `FinalizationRegistry` (advanced, rarely needed)
+
+- **`WeakRef`** holds a reference that **doesn't keep the object alive**. `ref.deref()` returns the object, or `undefined` if it has been garbage-collected. Use for a cache of large objects that's fine to lose under memory pressure.
+- **`FinalizationRegistry`** lets you run a callback **some time after** an object is collected — e.g. to release a related resource.
+
+```js
+const cache = new Map();                     // key → WeakRef(bigObject)
+function get(key) {
+  const obj = cache.get(key)?.deref();
+  if (obj) return obj;                       // still alive
+  const fresh = loadBig(key);
+  cache.set(key, new WeakRef(fresh));
+  return fresh;
+}
+```
+
+⚠️ GC timing is unpredictable — the callback may run late or **never** (e.g. the page closes first). Never use these for important logic like saving data or closing connections; use explicit cleanup for that. The spec itself says "avoid where possible."
 
 ---
 

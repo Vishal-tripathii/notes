@@ -85,7 +85,7 @@ console.log(m.size);
 
 - *Scale:* a `Map` used as an in-memory cache keeps growing forever since entries are never removed — what breaks at scale, and how does that connect to why `WeakMap` alone doesn't fully solve unbounded-cache growth (hint: what if the key is a primitive-derived string, not an object)?
 - *Consistency:* code iterates a `Map` with `for...of` while another part of the same synchronous function calls `.delete()` on an entry not yet visited — is that safe in JS, and why does the single-threaded execution model make this a non-issue compared to a multi-threaded language?
-- *Failure mode:* a `WeakMap` is used to cache expensive computed results keyed by a plain string (`"user:123"`) instead of an object — why does this fail to compile/work as intended, and what's the actual constraint on `WeakMap` keys?
+- *Failure mode:* a `WeakMap` is used to cache expensive computed results keyed by a plain string (`"user:123"`) instead of an object — why does this fail at runtime (`TypeError: Invalid value used as weak map key`), and what's the actual constraint on `WeakMap` keys? (Objects — and, since ES2023, non-registered symbols; never strings or numbers.)
 
 ---
 

@@ -36,8 +36,10 @@ const acc = new Account('V');
 acc.deposit(100);
 console.log(acc.balance);      // 100 — via the getter, looks like a plain property read
 acc.balance = -5;                // throws — via the setter
-console.log(acc.#balance);        // SyntaxError — truly private, not even accessible for reading
+// console.log(acc.#balance);     // SyntaxError — see the warning below
 ```
+
+> ⚠️ **`acc.#balance` outside the class is a *parse-time* error.** The engine checks private names before running anything, so if that line is in the file, **the whole file refuses to run** — not even the lines above it execute. It's not a runtime error you can `try/catch`. (To *test* whether an object has a private field from inside the class, use `#balance in obj`.)
 
 ## 2. `#field` vs the Old Closure/Underscore Conventions
 
@@ -76,14 +78,14 @@ new Dog('Rex', 'Lab').speak();
 // 'Rex makes a sound'
 // 'Rex barks'
 ```
-**What `super()` actually does under the hood:** calls the parent class's constructor, with `this` bound to the instance currently being constructed — mechanically identical to `Animal.call(this, name)` in the constructor-function pattern ([Part 08](08-prototype-and-inheritance.md)). In a derived class, `this` doesn't even exist until `super()` runs — referencing it before that throws a `ReferenceError`.
+**What `super()` actually does under the hood:** runs the parent class's constructor, and **the parent constructor is the one that creates the object** — then `this` in the child refers to it. It's *similar* to `Animal.call(this, name)` in the old pattern ([Part 08](08-prototype-and-inheritance.md)), but not identical: with `.call`, the child had already created `this`. That difference is why extending built-ins (`Array`, `Error`, `Map`) only works properly with `class`. In a derived class, `this` doesn't exist until `super()` runs — touching it before that throws a `ReferenceError`.
 
 ---
 
 ## Interview Q&A
 
 **Q: What does `super()` actually do?**
-> It calls the parent class's constructor with `this` bound to the instance being built — the class-syntax equivalent of `Parent.call(this, ...args)` in the old constructor-function pattern. In a subclass, `this` isn't initialized until `super()` returns, so any reference to `this` before that line throws.
+> It runs the parent class's constructor, which creates and initializes the object; after it returns, `this` in the child refers to that object. It's like `Parent.call(this, ...args)` in the old pattern, except the parent creates `this` instead of the child — which is why `class X extends Array` works and the old trick didn't. In a subclass, any reference to `this` before `super()` throws a `ReferenceError`.
 
 **Q: How is `#field` different from the `_field` naming convention?**
 > `_field` is purely a social convention — nothing stops external code from reading or writing it. `#field` is enforced by the engine itself: accessing it from outside the class is a `SyntaxError`, not just bad practice, and it's not even visible to subclasses.
@@ -102,7 +104,7 @@ const s = new Sub();
 console.log(s.increment(), s.increment());
 console.log(s.#count);
 ```
-> `1 2`, then `SyntaxError` at the `console.log(s.#count)` line — `#count` is genuinely private to `Counter`; even a subclass instance can't reach in and read it directly, only through inherited methods.
+> **Nothing prints at all** — a `SyntaxError` is reported before the code runs. Private names are checked when the file is *parsed*, and `s.#count` outside `Counter` is invalid, so the whole script is rejected. Remove that last line and you get `1 2`: `#count` is private to `Counter`, so even a subclass can only use it through inherited methods like `increment()`.
 
 ---
 

@@ -31,7 +31,8 @@ fn();                    // this = undefined (strict) — same function, differe
 
 ```js
 function show() { console.log(this.name); }
-show();                          // Rule 4: undefined
+show();                          // Rule 4: strict mode (modules, classes) → this is undefined → TypeError
+                                 //         old non-strict browser script → this is window → window.name ('')
 const user = { name: 'V', show };
 user.show();                       // Rule 3: 'V'
 user.show.call({ name: 'Other' }); // Rule 2, beats Rule 3: 'Other'
@@ -114,7 +115,15 @@ console.log(obj.regular(), obj.arrow());
 const { regular } = obj;
 console.log(regular());
 ```
-> `'A' undefined`, then `undefined` — arrow captured `this` from outside the object literal; destructuring `regular` detaches it from `obj`, so the bare call hits default binding.
+> `obj.regular()` is `'A'` everywhere. The other two **depend on where the code runs** — say that in the interview, it's the strong answer:
+>
+> | Where | `obj.arrow()` (`this` = outer `this`) | `regular()` (detached, default binding) |
+> |---|---|---|
+> | ES module (or any strict code) | 💥 `TypeError` — outer `this` is `undefined` | 💥 `TypeError` — `this` is `undefined` |
+> | old browser `<script>` (non-strict) | `''` — `this` is `window`, and `window.name` exists | `''` |
+> | Node, CommonJS file | `undefined` — `this` is `module.exports` (`{}`) | `undefined` in sloppy mode (`globalThis.name`), `TypeError` in strict |
+>
+> The idea behind every row is the same: the arrow captured `this` from **outside** the object literal (never `obj`), and destructuring `regular` detached it, so default binding applies.
 
 ---
 

@@ -118,7 +118,8 @@ const obj = Object.freeze({ a: 1, nested: { b: 2 } });
 obj.a = 100; obj.nested.b = 200;
 console.log(obj.a, obj.nested.b);
 ```
-> `1 200` — `a` protected by freeze; `nested`'s own properties are untouched by a shallow freeze.
+> In an old non-strict script: `1 200` — the write to `a` is **silently ignored**; `nested`'s own properties are untouched by a shallow freeze.
+> In **strict mode** (every ES module and class body is strict): `obj.a = 100` **throws `TypeError: Cannot assign to read only property 'a'`**, so nothing after it runs. Mention both — modern code is almost always strict.
 
 ---
 
