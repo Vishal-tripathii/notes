@@ -2,7 +2,7 @@
 
 > **How to use:** cover the answer, say yours out loud, then compare — speaking still finds gaps that reading hides. But unlike its terse siblings, this bank is written to work as a **standalone crash course**: every answer opens with a plain definition, then the tradeoff/reasoning behind it, then a short code snippet wherever the concept has real shape in code. If someone has time for exactly one file before an interview and never opens the rest of the `nodejs/` notes folder, this is the one that gets them ready.
 >
-> **~255 questions · 28 sections**
+> **~300 questions · 37 sections** (sections 29–37 and the new questions in 7, 13, 14 and 27 were added in the gap review — each links to its full note).
 
 ---
 
@@ -16,28 +16,37 @@
 | 4 | [Asynchronous Programming](#s4) | [Part 03](03-asynchronous-programming.md) |
 | 5 | [Microtasks & Macrotasks](#s5) ⭐ | [Part 01](01-javascript-execution-model.md) |
 | 6 | [libuv](#s6) ⭐ | [Part 02](02-nodejs-internals.md) |
-| 7 | [File System](#s7) | [Part 09.5](09.5-streams-deep-dive.md) |
+| 7 | [File System](#s7) | [Part 05.5](05.5-file-system-and-paths.md), [09.5](09.5-streams-deep-dive.md) |
 | 8 | [Streams](#s8) ⭐ | [Part 09.5](09.5-streams-deep-dive.md) |
 | 9 | [Buffers](#s9) | [Part 05](05-buffers.md) |
 | 10 | [Modules](#s10) | [Part 04](04-modules.md) |
 | 11 | [Express Internals](#s11) | [Part 06](06-http-and-express.md) |
 | 12 | [HTTP](#s12) | [Part 06](06-http-and-express.md) |
-| 13 | [EventEmitter](#s13) | [Part 02](02-nodejs-internals.md) |
-| 14 | [Process](#s14) | [Part 02](02-nodejs-internals.md) |
+| 13 | [EventEmitter](#s13) | [Part 02.5](02.5-eventemitter-process-and-errors.md) |
+| 14 | [Process](#s14) | [Part 02.5](02.5-eventemitter-process-and-errors.md) |
 | 15 | [Worker Threads](#s15) | [Part 09](09-performance.md) |
 | 16 | [Child Processes](#s16) | [Part 09](09-performance.md) |
 | 17 | [Memory Management](#s17) | [Part 02.8](02.8-memory-management.md) |
 | 18 | [Performance](#s18) | [Part 09](09-performance.md) |
 | 19 | [Security](#s19) | [Part 07](07-authentication-and-security.md) |
 | 20 | [Node Architecture](#s20) | [Part 02](02-nodejs-internals.md) |
-| 21 | [Build & Runtime](#s21) | — |
+| 21 | [Build & Runtime](#s21) | [Part 04.5](04.5-npm-packages-and-configuration.md), [14](14-typescript-with-node.md) |
 | 22 | [Scaling Node](#s22) | [Part 09](09-performance.md) |
 | 23 | [Advanced Internals](#s23) ⭐ | [Part 02](02-nodejs-internals.md) |
 | 24 | [Backend System Design](#s24) | [Part 11](11-api-design.md) |
 | 25 | [Senior "Why" Questions](#s25) ⭐ | — |
 | 26 | [Database & Mongoose](#s26) | [Part 08](08-mongodb-and-mongoose.md) |
-| 27 | [Testing](#s27) | — |
+| 27 | [Testing](#s27) ⭐ | [Part 10](10-testing.md) |
 | 28 | [Scenario & Debugging](#s28) ⭐ | — |
+| 29 | [Production HTTP — timeouts, keep-alive, caching](#s29) ⭐ | [Part 06.5](06.5-production-http-timeouts-keepalive-caching.md) |
+| 30 | [Running in production — shutdown, health, Docker](#s30) ⭐ | [Part 06.6](06.6-graceful-shutdown-health-checks-and-docker.md) |
+| 31 | [File uploads](#s31) | [Part 06.7](06.7-file-uploads.md) |
+| 32 | [Security beyond login](#s32) ⭐ | [Part 07.5](07.5-security-beyond-auth.md) |
+| 33 | [Logging & observability](#s33) ⭐ | [Part 10.5](10.5-logging-and-observability.md) |
+| 34 | [Background jobs](#s34) ⭐ | [Part 12](12-background-jobs-and-scheduling.md) |
+| 35 | [Real-time — WebSockets & Socket.IO](#s35) | [Part 13](13-websockets-and-socketio.md) |
+| 36 | [TypeScript with Node](#s36) | [Part 14](14-typescript-with-node.md) |
+| 37 | [Modern Node](#s37) | [Part 15](15-modern-node-features.md) |
 
 ---
 
@@ -131,7 +140,7 @@ function Point(x, y) { this.x = x; this.y = y; }   // same order every time → 
 Caching the result of a property lookup at the exact call site that performed it. The first time a line reads `obj.name`, V8 records "for this hidden class, `name` lives at offset 8"; every later execution of that same line skips the lookup and reads the offset directly. It's fastest when a call site always sees objects of the same hidden class (**monomorphic**) and gets progressively slower as it sees more shapes (**polymorphic**, then **megamorphic**).
 
 ### How does V8 perform garbage collection?
-Generationally, based on the observation that most objects die almost immediately after being created. The **young generation** is a small space collected frequently by a fast copying collector (the scavenger); anything that survives a couple of collections gets promoted to the **old generation**, which is collected far less often using mark-sweep-compact, done incrementally and concurrently so pauses stay short. GC runs on the same main thread as your JavaScript, so a collection pause is CPU work like any other — it blocks the event loop.
+Generationally, based on the observation that most objects die almost immediately after being created. The **young generation** is a small space collected frequently by a fast copying collector (the scavenger); anything that survives a couple of collections gets promoted to the **old generation**, which is collected far less often using mark-sweep-compact. V8 does much of the marking work on **background threads** to keep pauses short — but parts of every collection still **pause the main thread**, and while it's paused your JavaScript (and the event loop) can't run. Bigger heaps and more garbage mean longer and more frequent pauses.
 
 ### Why does memory leak happen even with GC?
 Because garbage collection frees objects that are **unreachable**, not objects that are merely **unused**. If anything — a global cache, a live event listener, a running timer — still holds a reference to an object, the collector is obligated to keep it, even if your program will genuinely never touch it again. The usual culprits: values piling up in a module-level object or `Map` with no eviction, closures retaining more of their enclosing scope than they actually use, timers that are never cleared, and listeners that are added but never removed.
@@ -410,7 +419,7 @@ app.get('/x', (req, res) => {
 ```
 
 ### Streams vs `readFile()`
-`readFile` loads the **entire file into memory** as one Buffer before your callback runs at all. A stream delivers the same file in small chunks — typically 64KB at a time — so you can start processing before the whole thing has even finished loading. For a 2GB file, `readFile` needs roughly 2GB of RAM and can actually exceed V8's Buffer size limit outright; a stream needs about 64KB regardless of the file's total size.
+`readFile` loads the **entire file into memory** as one Buffer before your callback runs at all. A stream delivers the same file in small chunks — typically 64KB at a time — so you can start processing before the whole thing has even finished loading. For a 2GB file, `readFile` needs roughly 2GB of RAM — and it refuses files over 2 GiB outright (`ERR_FS_FILE_TOO_LARGE`); a stream needs about 64KB regardless of the file's total size.
 
 ```js
 const data = await fs.promises.readFile('2gb.csv');   // ❌ 2GB in memory, or fails outright
@@ -419,6 +428,18 @@ fs.createReadStream('2gb.csv').pipe(res);              // ✅ ~64KB at a time
 
 ### How should large files be handled?
 Always stream, never `readFile`. Read with `fs.createReadStream`, transform in the middle if needed, write with `fs.createWriteStream`, and connect the whole chain with `pipeline()` so errors and cleanup on every stream in the chain are handled automatically rather than leaking file descriptors.
+
+### `path.join` vs `path.resolve`, and `__dirname` vs `process.cwd()`?
+`path.join` **glues** pieces together and tidies them (`a/b/../c` → `a/c`) — the result may still be relative. `path.resolve` always returns an **absolute** path, starting from the current working directory. `__dirname` is the folder **this source file** lives in — it never changes. `process.cwd()` is the folder the process was **started from** — it depends on how someone launched the app. Build paths to your own files from `__dirname` (in ES modules: `import.meta.dirname`), or they break the moment someone runs the app from another folder. Never build paths by gluing strings with `/`.
+
+### How do you serve a file whose name comes from the user, safely?
+Never pass the name straight into a path — `../../etc/passwd` is a valid "file name" (**path traversal**). Resolve the full path and check it still starts with the allowed folder; or, better, store files under generated ids and look up the id, so user text never becomes a path. More: [Part 5.5](05.5-file-system-and-paths.md).
+
+```js
+const base = path.resolve(UPLOADS);
+const target = path.resolve(base, name);
+if (!target.startsWith(base + path.sep)) return res.sendStatus(400);
+```
 
 ### What are the memory implications of choosing `readFile` for large or user-supplied files?
 Ten concurrent users downloading the same 1GB file with `readFile` means 10GB of memory held simultaneously and a very likely crash. The identical scenario with streams costs a few hundred KB total, because only the chunks currently in flight ever exist in memory at once — the rest stays on disk or on the wire until it's actually needed.
@@ -432,7 +453,7 @@ Ten concurrent users downloading the same 1GB file with `readFile` means 10GB of
 A stream is an interface for working with data **piece by piece** as it arrives or departs, rather than requiring the whole thing to exist in memory at once. Concretely it's an `EventEmitter` with a defined protocol for chunks (`'data'`), completion (`'end'`/`'finish'`), and failure (`'error'`) — and that's exactly *why* streams use events instead of a single promise: a promise settles once, but a stream produces many chunks over time, which is the wrong shape for something that resolves exactly once.
 
 ### Why do streams exist?
-Because processing data shouldn't require memory proportional to that data's size. A stream lets you handle 10GB with essentially the same memory footprint as 10KB — reading data through a straw instead of trying to swallow the entire pool at once. Beyond memory, a stream also lets the consumer start receiving the first byte immediately instead of waiting for the whole payload to load, and it removes any hard size ceiling — `readFile` tops out around the Buffer limit (~2GB); a stream has none.
+Because processing data shouldn't require memory proportional to that data's size. A stream lets you handle 10GB with essentially the same memory footprint as 10KB — reading data through a straw instead of trying to swallow the entire pool at once. Beyond memory, a stream also lets the consumer start receiving the first byte immediately instead of waiting for the whole payload to load, and it removes any hard size ceiling — `fs.readFile` refuses files over 2 GiB; a stream has no limit.
 
 ### What are the four types of streams?
 ```
@@ -609,7 +630,7 @@ exports.done = true;                 console.log(a.done);         // false, not 
 ```
 
 ### What are dynamic imports?
-`import('./module.js')` returns a promise and loads a module at runtime rather than at parse time — used for conditionally loading a module, for code-splitting, and as the portable way to load an ES module from CommonJS code, since `require()` cannot load ESM synchronously (`require` is sync; ESM resolution is async).
+`import('./module.js')` returns a promise and loads a module at runtime rather than at parse time — used for conditionally loading a module, for code-splitting, and as the portable way to load an ES module from CommonJS code. (On older Node, `require()` of an ES module throws `ERR_REQUIRE_ESM`. Since Node 22.12 / 20.19, `require()` can load an ES module as long as it has no top-level `await` — `import()` still works everywhere.)
 
 ```js
 const { default: chalk } = await import('chalk');
@@ -689,7 +710,7 @@ The request object Node hands you — and critically, it's a **Readable stream**
 The response object — a **Writable stream**. `res.write()` sends a chunk immediately; `res.end()` finishes the response. Express's `res.json()` is simply a convenience wrapper that sets the right header and calls `end()` for you.
 
 ### What is HTTP keep-alive?
-Reusing a single TCP (and, for HTTPS, TLS) connection across multiple sequential requests instead of tearing it down and reconnecting for every one. It eliminates the handshake cost per request, which is a substantial saving since the handshakes themselves can cost more round trips than the actual request. It's the default behavior in HTTP/1.1.
+Reusing a single TCP (and, for HTTPS, TLS) connection across multiple sequential requests instead of tearing it down and reconnecting for every one. It eliminates the handshake cost per request, which is a substantial saving since the handshakes themselves can cost more round trips than the actual request. It's the default behavior in HTTP/1.1, and since Node 19 Node's own outgoing HTTP agent (and the built-in `fetch`) reuse connections by default too. ⚠️ The famous production bug: Node's server closes idle keep-alive connections after **5s**, while load balancers like AWS ALB keep them for **60s** — the LB occasionally reuses a connection Node is just closing, and the user gets a random **502**. Fix: `server.keepAliveTimeout` longer than the LB's idle timeout ([Part 6.5 §3](06.5-production-http-timeouts-keepalive-caching.md)).
 
 ### What is chunked transfer encoding?
 Sending a response in pieces without knowing the total content length up front, signaled by `Transfer-Encoding: chunked`. It's what makes streaming a response possible at all — the server can start sending bytes before it knows, or before it has even produced, the full body.
@@ -735,6 +756,18 @@ Every call to `on()` keeps a reference to the callback and everything its closur
 ### Why does the "max listeners" warning exist?
 Node warns once an emitter accumulates more than 10 listeners for the same event. It is **not an error and not a hard limit** — it's a leak detector, built on the assumption that eleven listeners for one event usually means listeners are being added in a loop somewhere and never removed. If the count is genuinely intentional, raise it explicitly with `setMaxListeners()`.
 
+### What happens if an emitter emits `'error'` and nobody is listening?
+Node **throws** the error — and if nothing catches it, the process crashes. `'error'` is the one event name with this special rule. That's why every stream, socket, child process and database client needs an `'error'` listener (or, for streams, `pipeline()`, which wires it up for you). It's one of the most common ways a single bad connection takes down a whole server.
+
+```js
+const e = new EventEmitter();
+e.emit('error', new Error('boom'));   // 💥 no listener → thrown → crash
+e.on('error', err => logger.error({ err }));   // ✅ now it's just handled
+```
+
+### Do `async` listeners make `emit()` wait?
+No. `emit()` calls listeners synchronously and ignores what they return — so an `async` listener's promise is dropped, and if it rejects, that's an **unhandled rejection** (which crashes Node by default). Catch errors inside the listener, or create the emitter with `{ captureRejections: true }` so rejections are routed to its `'error'` event. To *wait for* an event as a promise, use `await events.once(emitter, 'name')`. Full part: [Part 2.5](02.5-eventemitter-process-and-errors.md).
+
 ---
 
 <a name="s14"></a>
@@ -765,6 +798,19 @@ The operating system's process id for the running Node process — used for logg
 
 ### What does `process.nextTick()` do?
 Schedules a callback to run after the current synchronous operation completes but before promise callbacks and before the event loop is allowed to continue — Node-specific, and the single highest-priority queue that exists, which is exactly why an application that leans on it too heavily can starve the entire loop.
+
+### What should an `uncaughtException` / `unhandledRejection` handler do?
+**Log, then exit.** Think of an engine fire on a plane: you land at the nearest airport, you don't continue to the destination. After an error nobody expected, the process may be in a broken state — a half-finished write, a lock never released — so continuing risks corrupt data. Log the error with context, exit with code 1, and let the process manager (PM2, Docker, Kubernetes) start a fresh copy; with several instances running, users don't notice. Since **Node 15, an unhandled rejection crashes the process by default**, just like an uncaught exception. Never install an empty handler that swallows everything.
+
+```js
+process.on('unhandledRejection', (reason) => { logger.fatal({ reason }); process.exit(1); });
+```
+
+### Operational errors vs programmer errors?
+**Operational** errors are expected events in a healthy system — invalid input, not found, a timeout from another service, a declined card. You *handle* them: return the right status code, retry, or fall back. **Programmer** errors are bugs — `undefined is not a function`, a wrong argument type. You can't handle a bug at runtime; you fix the code, and in production you let the process crash and restart. Model operational errors as your own error classes with a `status` and a stable `code`, and map them to responses in one error middleware.
+
+### What do exit codes 137 and 143 mean?
+128 + the signal number. **143** = SIGTERM (a normal stop, e.g. during a deploy). **137** = SIGKILL — in a container, almost always the **out-of-memory killer**. Also: prefer `process.exitCode = 1` over `process.exit(1)`, which stops instantly and can drop unflushed logs. More: [Part 2.5](02.5-eventemitter-process-and-errors.md).
 
 ---
 
@@ -978,13 +1024,13 @@ A signed token carrying a set of claims, letting the server verify a request's a
 Sessions keep state on the server (typically Redis) and hand the client only a meaningless-alone id; they cost a lookup per request (~1ms) but can be revoked instantly by deleting the server-side row. JWTs are self-contained and verified with pure math — no lookup, no shared store — but can't be revoked before expiry and require every verifying service to hold (or fetch) the signing key. Default to **sessions** for a normal web app, where instant revocation matters and 1ms of Redis is not the bottleneck; reach for JWTs when statelessness buys something real — multiple services that shouldn't share a store, mobile clients, or third-party API consumers.
 
 ### How does password hashing work, and why not SHA-256?
-Use **bcrypt, scrypt, or argon2id** — never a general-purpose fast hash like SHA-256 or MD5. Hashes built for speed are exactly wrong for passwords: a GPU computes billions of SHA-256 hashes per second, so a short password falls to brute force in minutes. bcrypt does roughly 10 thousand per second by design — being deliberately slow **is** the security property, turning the same attack into centuries. bcrypt also salts automatically and stores the salt inside the resulting hash string, so two users with identical passwords get different hashes and rainbow tables fail outright.
+Use **bcrypt, scrypt, or argon2id** — never a general-purpose fast hash like SHA-256 or MD5. Hashes built for speed are exactly wrong for passwords: a GPU computes billions of SHA-256 hashes per second, so a short password falls to brute force in minutes. bcrypt at cost 12 takes ~250ms per hash on a server core — millions of times slower per guess — and the cost factor can be raised as hardware gets faster. Being deliberately slow **is** the security property. bcrypt also salts automatically and stores the salt inside the resulting hash string, so two users with identical passwords get different hashes and rainbow tables fail outright.
 
 ```js
 const hash = await bcrypt.hash(password, 12);       // ~250ms — on purpose
 const ok   = await bcrypt.compare(password, hash);  // never compare hashes yourself
 ```
-⚠️ bcrypt runs on the libuv **thread pool**, so it's a classic pool-exhaustion case: four concurrent logins saturate all four default threads, and the fifth user waits a full hash cycle behind them — CPU looks idle and event loop lag looks fine while login latency alone climbs. Always use the async variant; `bcrypt.hashSync` blocks the event loop directly for every login.
+⚠️ The native **`bcrypt`** package runs on the libuv **thread pool** (the pure-JavaScript **`bcryptjs`** runs on the main thread instead and blocks the event loop — know which one you installed). With native bcrypt it's a classic pool-exhaustion case: four concurrent logins saturate all four default threads, and the fifth user waits a full hash cycle behind them — CPU looks idle and event loop lag looks fine while login latency alone climbs. Always use the async variant; `bcrypt.hashSync` blocks the event loop directly for every login.
 
 ### How do refresh tokens and rotation work, and what race condition does rotation create?
 A short-lived access token (minutes, sent on every request) paired with a long-lived refresh token (days, sent only to a dedicated `/refresh` endpoint and stored server-side) — this pattern exists precisely *because* a JWT itself can't be revoked. The refresh token, being server-side, genuinely can be. Under **rotation**, every use of a refresh token invalidates it and issues a brand-new one — a single-use ticket. The payoff is automatic theft detection: if an already-used refresh token is presented again, two copies must exist, meaning it was stolen, so the server revokes the **entire token family** and forces a fresh login rather than trusting either copy.
@@ -1065,7 +1111,7 @@ The OS notifies libuv that the listening socket has become readable; libuv wakes
 # 21. Build & Runtime
 
 ### npm vs npx
-`npm` installs and manages a project's dependencies. `npx` **executes** a package's binary, downloading it temporarily on the spot if it isn't already installed locally or globally — which is why `npx create-react-app` works with no global install at all, and always runs whatever the current published version is rather than a stale cached one.
+`npm` installs and manages a project's dependencies. `npx` **executes** a package's binary — the project's locally installed copy if there is one, otherwise it downloads it temporarily — which is why `npx create-vite@latest` works with no global install at all. Add `@latest` when you want to be sure you're not running an older cached copy. More on npm: [Part 4.5](04.5-npm-packages-and-configuration.md).
 
 ### What is `package.json`?
 The project's manifest — name, version, dependencies, scripts, and entry points. `dependencies` are required at runtime in production; `devDependencies` are needed only for local development and the build itself, and shouldn't ship.
@@ -1083,7 +1129,7 @@ For `require('x')`: first check whether `x` is a core module (`fs`, `path`) — 
 Configuration passed into the process from outside the code — connection strings, secrets, feature flags. They keep sensitive values out of source control and let one identical build run correctly across every environment. Every value arrives as a string, so validate and coerce them once at startup — a config-loading failure that surfaces immediately at boot is far better than a misconfigured value silently propagating as `undefined` and only failing three requests deep at 3am.
 
 ### What build tools does Node use, and why does the toolchain matter?
-Plain Node usually runs your source directly with no build step at all. A build tool becomes necessary for TypeScript compilation, bundling a serverless function, or transpiling for an older runtime target. `tsc`, esbuild, and swc are the common choices — esbuild and swc are dramatically faster because, unlike `tsc`, neither is itself written in JavaScript. `tsc` both type-checks *and* emits JavaScript; esbuild/swc strip types **without checking them** at all, which is much faster but means real type safety only comes from running `tsc --noEmit` separately, typically in CI, alongside the fast build tool.
+Plain Node usually runs your source directly with no build step at all. A build tool becomes necessary for TypeScript compilation, bundling a serverless function, or transpiling for an older runtime target. `tsc`, esbuild, and swc are the common choices — esbuild and swc are dramatically faster because, unlike `tsc`, neither is itself written in JavaScript. `tsc` both type-checks *and* emits JavaScript; esbuild/swc — and Node's own built-in type stripping (`node file.ts`, on by default since Node 23.6 / 22.18) — remove types **without checking them**, which is much faster but means real type safety only comes from running `tsc --noEmit` separately, typically in CI. More: [Part 14](14-typescript-with-node.md).
 
 ### What are source maps for?
 A mapping from compiled/transpiled output back to the original source, so stack traces, breakpoints, and error reports show real file names and line numbers instead of minified or transpiled gibberish. Essential for debugging TypeScript from production error reports, where the deployed code is never the code you actually wrote.
@@ -1191,11 +1237,15 @@ An endpoint the load balancer or orchestrator polls to decide whether to route t
 On receiving `SIGTERM`: stop accepting brand-new connections, let in-flight requests finish naturally, close database and queue connections cleanly, then exit — with a timeout as a hard backstop in case something never finishes. Without this, every single deploy silently drops whatever requests happened to be mid-flight at that instant, which is one of the most common causes of intermittent 502s users report right after a rollout.
 
 ```js
-process.on('SIGTERM', () => {
-  server.close(async () => { await db.end(); process.exit(0); });
-  setTimeout(() => process.exit(1), 10_000).unref();   // force-quit backstop
+process.on('SIGTERM', async () => {
+  shuttingDown = true;                                  // readiness check now returns 503
+  setTimeout(() => process.exit(1), 25_000).unref();    // force-quit backstop (< platform grace period)
+  await sleep(5_000);                                   // let the load balancer stop routing here
+  server.close(async () => { await db.end(); process.exitCode = 0; });
+  server.closeIdleConnections();                        // don't wait for idle keep-alive sockets
 });
 ```
+Two traps: in Docker, `CMD npm start` (or the shell form) means SIGTERM never reaches Node at all — use `CMD ["node", "index.js"]`; and `server.close()` alone can wait on idle keep-alive connections. Full walkthrough: [Part 6.6](06.6-graceful-shutdown-health-checks-and-docker.md).
 
 ### How do you make a `POST` endpoint idempotent?
 Because the network can't distinguish "the request never arrived" from "it arrived and only the response was lost," a client retrying a failed request is correct behavior — which means the server has to make retries safe, since `POST` isn't naturally idempotent the way `GET`/`PUT`/`DELETE` are. The standard mechanism is a client-generated `Idempotency-Key` header: the server **atomically** claims the key with `SET NX` (a plain check-then-act races — two simultaneous retries can both see "not found" and both create a duplicate order), does the underlying work exactly once, and stores the resulting response so any retry replays the identical result — same order id, same status — instead of creating a second one. A request arriving while the original is still mid-flight gets a `409` rather than either a duplicate or a stale response.
@@ -1229,7 +1279,7 @@ Because not every kind of work has a non-blocking interface at the OS level. Fil
 Because V8 only knows how to execute JavaScript — it has no built-in notion of a file, a socket, or a timer. And every operating system exposes async I/O in a completely different, incompatible way. libuv supplies the event loop, the thread pool, and one uniform API layered over epoll, kqueue, and IOCP so the same JavaScript behaves identically everywhere.
 
 ### Why doesn't `setTimeout(0)` execute immediately?
-Because it schedules the callback for the **timers phase of the next loop iteration**, not for the current instant. The currently running synchronous code has to finish first, then the `nextTick` and promise microtask queues drain completely, and only after all of that can the loop reach the timers phase at all. `setTimeout(0)` genuinely means "as soon as possible," never "right now."
+Because it schedules the callback for the **timers phase of the next loop iteration**, not for the current instant. The currently running synchronous code has to finish first, then the `nextTick` and promise microtask queues drain completely, and only after all of that can the loop reach the timers phase at all. `setTimeout(0)` genuinely means "as soon as possible," never "right now." (Node also turns a delay of `0` into `1`ms — which is why, at the top level of a script, `setTimeout(0)` vs `setImmediate` can run in either order: it depends on whether 1ms has passed by the time the loop starts.)
 
 ### Why does `process.nextTick()` execute before Promises?
 Because Node maintains two entirely separate microtask queues and deliberately drains the `nextTick` queue first, completely, before touching the promise queue at all. It was originally designed so Node's own internals could react immediately after an operation — surfacing an error before anything else observed inconsistent state — and application code simply inherited that same top priority once the API was exposed publicly.
@@ -1304,7 +1354,7 @@ Without an index, satisfying a query means scanning every single document in the
 schema.index({ status: 1, createdAt: -1 });   // compound — field order matters (ESR, below)
 ```
 
-For compound indexes specifically, the ordering that decides everything is **ESR — Equality, Sort, Range**: equality fields go first (they collapse matching rows into one contiguous block), the sort field goes second (rows are then already in order within that block, so nothing needs sorting), and any range field goes last (a range covers a span rather than a point, so anything placed after it loses its ordering). Putting a range field before the sort field is the single most common indexing mistake — it forces MongoDB to collect all matches and sort them in memory, which shows up as an extra `SORT` stage in `explain()` and outright **fails past a 32MB in-memory sort limit**.
+For compound indexes specifically, the ordering that decides everything is **ESR — Equality, Sort, Range**: equality fields go first (they collapse matching rows into one contiguous block), the sort field goes second (rows are then already in order within that block, so nothing needs sorting), and any range field goes last (a range covers a span rather than a point, so anything placed after it loses its ordering). Putting a range field before the sort field is the single most common indexing mistake — it forces MongoDB to collect all matches and sort them in memory, which shows up as an extra `SORT` stage in `explain()`, and past the **100MB** in-memory sort limit (32MB before MongoDB 4.4) either **spills to disk** — slow, the default since 6.0 — or **fails**.
 
 ### What is a transaction, and when do you actually need one?
 An operation that groups several separate writes so they all succeed or all fail together. In MongoDB, transactions require a **replica set** — they don't work at all on a single standalone instance, which is exactly why they commonly "work in production and fail locally." They're also relatively expensive: locks are held for the transaction's full duration, contending with other writers to the same documents. Because a **single-document update in MongoDB is already atomic** on its own, needing transactions frequently is usually a signal that data which always changes together should have been modeled as one document in the first place — reserve them for genuine cross-entity operations, like a money transfer or an order plus its inventory adjustment, not as a patch over a schema design problem.
@@ -1348,7 +1398,25 @@ Either a genuinely in-memory or containerized test database for real integration
 Always `return` or `await` the promise under test so the test runner genuinely waits for it — a forgotten `await` produces a test that silently passes regardless of what the assertion inside it actually says. For timers and intervals, use fake timers so the test can advance a virtual clock instantly instead of the suite actually sitting and waiting on wall-clock time.
 
 ### What usually causes a flaky test?
-Shared mutable state leaking between tests, a genuine dependency on real timing, or an implicit dependency on execution order. The fixes are the same in every case: isolate state per test, fake time rather than sleeping, and never write a test whose correctness depends on which order the suite happens to run in.
+Shared mutable state leaking between tests, a genuine dependency on real timing, or an implicit dependency on execution order. The fixes are the same in every case: isolate state per test, fake time rather than sleeping, and never write a test whose correctness depends on which order the suite happens to run in. Other common causes: real network calls (use `nock`/MSW), parallel test files sharing one database (one database per worker), and asserting on results from a query with no `sort`.
+
+### What should you mock, and what shouldn't you?
+Mock what's **outside your control** or makes tests slow and random — third-party APIs, email, payments, the clock — and, in unit tests, the repository layer. Don't mock the code you're testing, and in integration tests use a **real** test database. The warning sign: a test with ten mocks is mostly testing the mocks; that code either does too much or deserves an integration test instead.
+
+### How do you make code easy to test?
+**Pass dependencies in** instead of creating them inside — `makeUserService({ userRepo, mailer })` rather than a function that imports the real database and email client. Keep business rules in services that know nothing about Express. And split `createApp()` (builds the Express app) from `server.listen()`, so supertest can use the app without opening a port.
+
+```js
+const userRepo = { findByEmail: vi.fn().mockResolvedValue({ id: 1 }), create: vi.fn() };
+await expect(makeUserService({ userRepo, mailer }).register(dup)).rejects.toThrow('Email taken');
+expect(userRepo.create).not.toHaveBeenCalled();
+```
+
+### Which test runner would you use?
+Jest is the most common in existing projects; Vitest is Jest-compatible, faster, and handles ESM/TypeScript natively; Node's built-in `node:test` (stable since Node 20) needs no dependency at all and includes mocks, fake timers and coverage. The concepts don't change between them. Full part: [Part 10](10-testing.md).
+
+### What does code coverage tell you?
+What **wasn't** run by any test. It doesn't tell you the rest is tested *well* — a test with no assertions still counts. Use it to find untested business logic and error branches, not as a number to chase to 100%.
 
 ---
 
@@ -1395,6 +1463,152 @@ Because retrying is only safe for **idempotent** operations, and plenty of real 
 
 ---
 
+<a name="s29"></a>
+# 29. ⭐ Production HTTP — Timeouts, Keep-Alive, Caching
+
+### Why does every wait need a timeout?
+Because without one, a single slow dependency keeps connections, memory and pool slots busy until nothing is left for anyone else — like a phone line that's never hung up. Set limits on the **incoming** side (`headersTimeout`, `requestTimeout`) and on **every outgoing call** (HTTP, database, Redis). Downstream timeouts should be shorter than the client's, so you never keep working on a request nobody is waiting for.
+
+### We get random 502s behind a load balancer. What's the first thing you check?
+Keep-alive timeouts. Node closes idle connections after **5s** by default; AWS ALB keeps them **60s**. Occasionally the ALB reuses a connection at the moment Node closes it → 502. Rule: **the backend waits longer than the load balancer** — `server.keepAliveTimeout = 65_000` and `headersTimeout` a bit higher.
+
+### How do you put a timeout on `fetch`?
+`fetch(url, { signal: AbortSignal.timeout(3000) })`. Node's `fetch` has **no timeout by default**, and it does **not** reject on 404/500 — always check `res.ok`.
+
+### What is `AbortController` for?
+Cancelling work you no longer need. Pass `controller.signal` to `fetch`, file reads, timers, streams or your own code, and call `abort()` — on a timeout, or when the client disconnects (`req.on('close', () => controller.abort())`). `AbortSignal.timeout(ms)` and `AbortSignal.any([...])` are shortcuts. A timeout means "stop waiting"; abort means "stop the work."
+
+### When is it safe to retry a failed call?
+When the operation is idempotent (GET/PUT/DELETE, or a POST with an idempotency key) and the error might go away (network error, timeout, 429, 502–504 — never other 4xx). Use exponential backoff **with jitter**, 2–3 attempts, respect `Retry-After`, and a circuit breaker so retries don't pile onto a service that's already down.
+
+### `Cache-Control: no-cache` vs `no-store`?
+`no-cache` = you may store it, but **check with the server before reusing** (usually an ETag → `304 Not Modified`). `no-store` = never store it — for sensitive data. Hashed static files get `public, max-age=31536000, immutable`; per-user data must never be `public`. More: [Part 6.5](06.5-production-http-timeouts-keepalive-caching.md).
+
+---
+
+<a name="s30"></a>
+# 30. ⭐ Running in Production — Shutdown, Health Checks, Docker
+
+### Liveness vs readiness — what goes in each?
+**Liveness** = "should the platform restart me?" — keep it trivial: can the process answer at all. **Readiness** = "should the platform send me traffic?" — may check the database, and returns 503 while shutting down. Putting a DB check in liveness is a classic outage: the DB blips → every instance "dies" → all restart at once → they stampede the DB on reconnect.
+
+### Why might SIGTERM never reach your Node process in Docker?
+Because something else is PID 1. With `CMD npm start` or the shell form (`CMD node app.js`), a shell or npm is PID 1 and may not forward signals — so your graceful-shutdown code never runs and the container is SIGKILLed after the grace period. Use `CMD ["node", "app.js"]` (exec form), or an init like `tini` / `docker run --init`.
+
+### What makes a good Node Dockerfile?
+Multi-stage build (dev tools stay out of the final image); copy `package.json` + lockfile **before** the source so the install layer caches; `npm ci --omit=dev`; a pinned slim base image; `NODE_ENV=production`; `USER node` (not root); exec-form `CMD`; a `.dockerignore`; and **no secrets** in the image.
+
+### PM2 or Kubernetes?
+PM2 manages processes on **one** machine (restarts, cluster mode, reloads). Kubernetes manages containers across **many** machines (autoscaling, rolling deploys, health checks). In containers, run **one Node process per container** and don't put PM2 inside — two systems would fight over restarts. More: [Part 6.6](06.6-graceful-shutdown-health-checks-and-docker.md).
+
+---
+
+<a name="s31"></a>
+# 31. File Uploads
+
+### How would you build file uploads?
+For anything but tiny files: the API checks the user, type and size and returns a **pre-signed URL**; the browser uploads **straight to S3**; then the API verifies the object and saves the metadata. Node never touches the bytes, so memory and bandwidth stay flat and it works across many instances. For small files through the API: `multer` with strict `limits`, then straight to object storage.
+
+### What's wrong with `multer.memoryStorage()` or saving uploads to local disk?
+Memory storage holds the **whole file in RAM** — a few big concurrent uploads and the process runs out of memory. Local disk **isn't shared** between instances, usually disappears when a container restarts, and fills up. Files belong in object storage; the database keeps the key and metadata.
+
+### How do you stop users uploading something dangerous?
+Limit size and count; check the **real** file type from its bytes (not the extension or `Content-Type`, which the client controls); store under a **generated name**; re-encode images (also strips GPS metadata); scan if others will open the files; and serve user files from a **separate domain** with `nosniff` and `Content-Disposition: attachment`, so an uploaded HTML/SVG can't run scripts on your site. More: [Part 6.7](06.7-file-uploads.md).
+
+---
+
+<a name="s32"></a>
+# 32. ⭐ Security Beyond Login
+
+### What is prototype pollution?
+Attacker-controlled JSON like `{"__proto__": {"isAdmin": true}}` gets written into an object by a naive deep merge, which adds `isAdmin` to `Object.prototype` — so **every object in the app** now has it. Prevent with schema validation that only allows known keys, merge code that skips `__proto__`/`constructor`/`prototype`, `Map` (or `Object.create(null)`) for user-keyed data, and updated libraries.
+
+### What is ReDoS, and why is it extra dangerous in Node?
+A regex with a repeat inside a repeat — like `/^(a+)+$/` — takes exponential time on input that *almost* matches. Regex runs on the **main thread**, so one request can freeze the whole server. Limit input length **before** any regex, avoid nested quantifiers, use proven validators, and use a linear-time engine (`re2`) for user-supplied patterns.
+
+### What is SSRF?
+Server-side request forgery: your server fetches a URL the user gave ("import from URL", webhooks, link previews), and the attacker points it **inside** your network — `http://169.254.169.254/` (cloud metadata, which can return credentials), `localhost:6379`, internal admin panels. Fix with a domain allow-list, or resolve the hostname and block private/link-local IPs (re-checking after every redirect), plus timeouts and size limits; on AWS require IMDSv2.
+
+### How do you defend against malicious or vulnerable npm packages?
+`npm install` means running strangers' code with your app's permissions. Commit the lockfile and install with `npm ci` so only reviewed versions arrive; `npm audit` + Dependabot/Renovate; watch for look-alike names (`expresss`); consider `--ignore-scripts`; keep dependencies few; keep secrets out of CI steps that don't need them.
+
+### How can one request take down a Node server?
+Anything that does a lot of synchronous work or memory in one go: a ReDoS regex, a huge JSON body, a large upload held in memory, `?limit=1000000`, a decompression bomb, a slowloris client. The answer is limits everywhere — body size, upload size, input length, page size, timeouts — plus rate limits. More: [Part 7.5](07.5-security-beyond-auth.md).
+
+---
+
+<a name="s33"></a>
+# 33. ⭐ Logging & Observability
+
+### Logs vs metrics vs traces?
+**Metrics** are the heart-rate monitor — cheap numbers over time that tell you *something* is wrong (p99, error rate). **Traces** are the patient's path through the hospital — where the time went across services. **Logs** are the nurse's notes — what exactly happened. Usual flow: an alert on a metric → a trace shows the slow step → the logs for that request explain why.
+
+### How do you get the request id into every log line, even deep inside services?
+Generate (or accept) an `x-request-id` per request, return it in the response, forward it to downstream calls — and use **`AsyncLocalStorage`**: a middleware calls `storage.run({ reqId }, next)`, and any code later in that request's async chain calls `storage.getStore()` to read it. Each concurrent request sees its own store — like an invisible backpack that follows the request through every `await`.
+
+```js
+app.use((req, res, next) => requestContext.run({ reqId: req.id }, next));
+// later, anywhere:  logger.info({ reqId: requestContext.getStore()?.reqId }, 'charged');
+```
+
+### What metrics matter for a Node service?
+The four golden signals — **latency** (p95/p99), **traffic**, **errors**, **saturation** — plus Node-specific: event loop lag, heap and GC pauses, DB pool wait count. Don't put user ids or raw URLs in metric labels — use route patterns (`/orders/:id`), or the number of time series explodes. More: [Part 10.5](10.5-logging-and-observability.md).
+
+---
+
+<a name="s34"></a>
+# 34. ⭐ Background Jobs
+
+### Why must background jobs be idempotent?
+Queues deliver **at least once**, not exactly once: a worker can finish the work and crash before marking the job done, so the job runs again. **"Every job may run twice — make running it twice harmless."** Use "already done?" checks, idempotency keys with payment/email APIs, unique constraints, upserts, and a fixed `jobId` when adding to avoid duplicates.
+
+### You save an order, then queue "send receipt" — sometimes no receipt goes out. Why?
+The database write and the queue add are **two separate systems**; a crash or Redis outage between them loses the job. Use the **outbox pattern** (write an outbox row in the same DB transaction, a relay publishes it), or at least a periodic repair job — and keep the job idempotent, because it may now be sent twice.
+
+### How do you run a cron job when the app has several instances?
+Not `setInterval`/`node-cron` in every instance — that runs it once **per instance**. Use the queue's scheduler (BullMQ job schedulers: one job per tick, stored in Redis), the platform's scheduler (Kubernetes CronJob, EventBridge), or take a Redis lock so only one instance runs it. Always state the time zone. More: [Part 12](12-background-jobs-and-scheduling.md).
+
+---
+
+<a name="s35"></a>
+# 35. Real-Time — WebSockets & Socket.IO
+
+### WebSockets vs Server-Sent Events?
+**Only the server pushes** (notifications, live feeds, progress, streaming AI output) → **SSE**: plain HTTP, the browser reconnects automatically, very simple. **Both sides talk often** (chat, multiplayer, collaboration) → **WebSockets**. Polling is fine for data that rarely changes.
+
+### How do you scale Socket.IO across several servers?
+A user on server 1 and a user on server 2 in the same room can't hear each other by default — each server only knows its own sockets. Add the **Redis adapter** so broadcasts go through Redis pub/sub to every server, use **sticky sessions** if the long-polling fallback is enabled, and keep the load balancer's idle timeout above the heartbeat interval.
+
+### How do you send a message to one user who has three tabs open?
+Join every socket to a per-user room at connection time (`socket.join('user:17')`), then `io.to('user:17').emit(...)`. With the Redis adapter it reaches all their tabs on any server. Authenticate in `io.use()` middleware with a token in `handshake.auth`, and remember sockets outlive token expiry — re-check or disconnect. More: [Part 13](13-websockets-and-socketio.md).
+
+---
+
+<a name="s36"></a>
+# 36. TypeScript with Node
+
+### Does TypeScript validate request bodies?
+**No.** Types are erased — Node only runs JavaScript. `req.body as CreateUser` is a promise to the compiler, not a check. **"TypeScript checks your code, not your users."** Validate outside data at runtime with zod, and derive the type from the schema (`type T = z.infer<typeof Schema>`) so the check and the type can never disagree.
+
+### How do you run TypeScript in Node?
+Production: usually `tsc` → run the JavaScript, with source maps (`--enable-source-maps`). Development: `tsx watch`, or Node's built-in type stripping (`node file.ts`). The fast options **don't type-check**, so run `tsc --noEmit` in CI. Turn on `"strict": true` from day one. More: [Part 14](14-typescript-with-node.md).
+
+### `any` vs `unknown`?
+`any` turns checking **off**. `unknown` means "could be anything — prove what it is before using it" (type guard, `instanceof`, schema parse). Use `unknown` for outside data and in `catch (err: unknown)`.
+
+---
+
+<a name="s37"></a>
+# 37. Modern Node
+
+### Which Node version in production?
+An **LTS** version — even numbers (20, 22, 24) get ~30 months of support; odd numbers are short-lived. Pin it in `engines`, `.nvmrc`, the Docker image and CI; upgrade before end-of-life.
+
+### What packages has modern Node made unnecessary?
+Global `fetch` (instead of `node-fetch`), `node --watch` (nodemon), `node --env-file` (dotenv), `node:test` (simple Jest/Mocha suites), `crypto.randomUUID()` (uuid), `structuredClone()` (deep-clone helpers), `AbortSignal.timeout()`, and running `.ts` files directly via type stripping. Fewer dependencies = less to update and less supply-chain risk. More: [Part 15](15-modern-node-features.md).
+
+---
+
 ## Before an interview
 
 ```
@@ -1402,6 +1616,8 @@ Because retrying is only safe for **idempotent** operations, and plenty of real 
 2. Stumble → open the linked Part, reread that section only.
 3. Highest yield: 3 (event loop), 5 (task queues), 6 (libuv), 8 (streams),
    19 (security), 25 (the whys), 28 (scenarios).
+   For a 3–4 years role add: 27 (testing), 29 (timeouts / 502s), 30 (shutdown & health),
+   32 (security beyond login), 33 (logging & request ids), 34 (idempotent jobs).
 4. If you have one hour: the event loop, why networking skips the thread pool,
    backpressure, and why sync code blocks everyone. Those four carry most interviews.
 ```

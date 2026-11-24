@@ -6,7 +6,7 @@
 >
 > **Continues from:** [Part 2](02-nodejs-internals.md) (bcrypt uses the thread pool; cluster breaks in-memory state) · [Part 6](06-http-and-express.md) (middleware order, validation).
 >
-> **Not a repeat of the system-design notes.** The concepts live in [15-authentication-vs-authorization](../15-authentication-vs-authorization.md), [16-jwt-deep-dive](../16-jwt-deep-dive.md), [17-oauth-sso-rbac](../17-oauth-sso-rbac.md), [18-sessions](../18-sessions.md), [19-password-hashing](../19-password-hashing.md). **This part is the Node implementation, the attacks, and — §9 — how credentials actually travel and what scaling does to them.**
+> **Not a repeat of the system-design notes.** The concepts live in [15-authentication-vs-authorization](../System-design/15-authentication-vs-authorization.md), [16-jwt-deep-dive](../System-design/16-jwt-deep-dive.md), [17-oauth-sso-rbac](../System-design/17-oauth-sso-rbac.md), [18-sessions](../System-design/18-sessions.md), [19-password-hashing](../System-design/19-password-hashing.md). **This part is the Node implementation, the attacks, and — §9 — how credentials actually travel and what scaling does to them.**
 
 ---
 
@@ -566,7 +566,7 @@ app.use(session({ store: new RedisStore({ client: redis }), ... }));
 ```
 **Now the servers are stateless** — any server serves any request, because the state isn't *in* the server. Add, remove, redeploy: nothing is lost.
 
-> ⭐ **This is what "stateless servers" actually means** — the prerequisite for horizontal scaling ([02.5-load-balancer-deep-dive](../02.5-load-balancer-deep-dive.md)). Not "no state" — state lives somewhere **shared**.
+> ⭐ **This is what "stateless servers" actually means** — the prerequisite for horizontal scaling ([02.5-load-balancer-deep-dive](../System-design/02.5-load-balancer-deep-dive.md)). Not "no state" — state lives somewhere **shared**.
 
 **Cost:** ~1 ms per request, and Redis becomes critical infrastructure (replicas, failover).
 
@@ -739,4 +739,4 @@ VALID → whitelist fields (mass assignment!) · coerce types · at the boundary
 
 ---
 
-*— Part 7 of the Node.js notes. Concepts: [15-auth-vs-authz](../15-authentication-vs-authorization.md) · [16-jwt](../16-jwt-deep-dive.md) · [17-oauth-rbac](../17-oauth-sso-rbac.md) · [18-sessions](../18-sessions.md) · [19-password-hashing](../19-password-hashing.md) —*
+*— Part 7 of the Node.js notes. Concepts: [15-auth-vs-authz](../System-design/15-authentication-vs-authorization.md) · [16-jwt](../System-design/16-jwt-deep-dive.md) · [17-oauth-rbac](../System-design/17-oauth-sso-rbac.md) · [18-sessions](../System-design/18-sessions.md) · [19-password-hashing](../System-design/19-password-hashing.md) —*

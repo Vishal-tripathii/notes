@@ -38,7 +38,11 @@
 Two things about V8 actually affect you:
 
 ### ① Node's memory ceiling is V8's, not your machine's
-The default heap is **~2 GB**, even on a 64 GB server. Load a 3 GB file into an array and you crash with `JavaScript heap out of memory` while `free -h` shows plenty of RAM free.
+V8 caps the heap at a size it picks for itself — commonly **around 2–4 GB** on a 64-bit machine (the exact number depends on your Node version and how much memory the machine or container has). It does **not** grow to use all of a 64 GB server. Load a 5 GB file into an array and you crash with `JavaScript heap out of memory` while `free -h` shows plenty of RAM free.
+
+```bash
+node -e "console.log(require('v8').getHeapStatistics().heap_size_limit / 1024 ** 3, 'GB')"   # see YOUR limit
+```
 
 ```bash
 node --max-old-space-size=4096 app.js    # raise the ceiling to 4GB
@@ -100,6 +104,8 @@ V8 knows nothing about files or networks (§1), so the instant your JS hits asyn
 | `crypto.pbkdf2`, `scrypt`, **bcrypt** | TCP sockets, **DB queries** |
 | `zlib` — gzip / compression | `setTimeout`, `setImmediate` |
 | `dns.lookup()` ⚠️ | `dns.resolve()` |
+
+> ⚠️ **"bcrypt uses the pool" depends on which package you installed.** The `bcrypt` package is native C++ and its async functions run on the pool. **`bcryptjs` is pure JavaScript — it runs on your main thread** and blocks the event loop while it hashes (its async API only splits the work into small pieces). Check your `package.json` before you explain a slow login.
 
 > ⚠️ **The `dns.lookup` trap:** `http.request` calls it implicitly to resolve hostnames, and it uses the pool. Under heavy outbound traffic, DNS resolution alone can eat all four threads.
 
@@ -341,7 +347,7 @@ NODE = V8 (runs your JS, owns the heap)  +  libuv (event loop, I/O, thread pool)
 
 ### V8 — the two operational facts
 ```
-• ~2GB default heap, regardless of machine RAM  → --max-old-space-size=4096
+• heap is capped (often ~2-4GB), NOT all your RAM  → --max-old-space-size=4096
 • GC runs ON the main thread → leaks show up as SPIKY LATENCY before OOM
 ```
 

@@ -4,7 +4,7 @@
 
 > **Format:** Q&A — my prompts are the questions, the explanations are the answers. Written the way you'd *say* it in an interview.
 >
-> **Concepts elsewhere:** [08-databases-sql-vs-nosql](../08-databases-sql-vs-nosql.md), [09-database-indexing](../09-database-indexing.md), [10-database-relationships](../10-database-relationships.md). **This is the Mongo-specific part** — what actually breaks in production.
+> **Concepts elsewhere:** [08-databases-sql-vs-nosql](../System-design/08-databases-sql-vs-nosql.md), [09-database-indexing](../System-design/09-database-indexing.md), [10-database-relationships](../System-design/10-database-relationships.md). **This is the Mongo-specific part** — what actually breaks in production.
 >
 > ⭐ **One idea runs through everything here: schema design is the only decision that really matters.** Slow `populate`, needing transactions, and cascade-delete pain are all *consequences* of getting embed-vs-reference wrong.
 
@@ -225,7 +225,7 @@ schema.index({ status: 1, createdAt: -1, price: 1 });
 
 > ⭐ **That last point is the whole rule. Put the range before the sort field, and the sort ordering is destroyed — so MongoDB has to collect all the matches and sort them in memory afterwards.**
 
-**How you'd notice:** `explain()` shows an extra `SORT` stage. And in-memory sorts have a **32MB limit** — cross it and the query doesn't just get slow, it **fails**.
+**How you'd notice:** `explain()` shows an extra `SORT` stage. And in-memory sorts have a **100MB limit** (it was 32MB before MongoDB 4.4). Past it, the query either **spills to disk** — very slow, and the default since MongoDB 6.0 — or **fails** if disk use isn't allowed.
 
 **Putting range before sort is the most common indexing mistake there is.**
 
@@ -520,7 +520,7 @@ Both use a **B-tree** — a sorted structure of pointers back to the real data. 
 | Compound-index rule | **Leftmost-prefix** | **ESR** — Equality, Sort, Range (§4) |
 | Array fields | No native support — needs a join table | **Multikey** index — indexes every array element |
 | Auto-expiry | Not built in — needs a scheduled job | **TTL** index — `expireAfterSeconds` |
-| Failure mode when misused | Full table scan | `COLLSCAN`, or an in-memory sort that fails past 32MB |
+| Failure mode when misused | Full table scan | `COLLSCAN`, or an in-memory sort that spills to disk or fails past 100MB |
 | Check if it's used | `EXPLAIN` | `.explain('executionStats')` → `IXSCAN` vs `COLLSCAN` |
 
 **The one-line answer if asked "how do Mongo and SQL indexes differ":** *"Mechanically the same — a B-tree with the same read/write tradeoff. The differences follow from the data model: SQL indexes scalar columns in normalized tables with leftmost-prefix ordering; MongoDB indexes fields inside documents, including whole arrays natively via multikey indexes, and orders compound fields by ESR instead."*
@@ -561,7 +561,7 @@ Easy to conflate these — they're not the same axis.
   ```
 - **NoSQL** = everything that *isn't* the relational/SQL model — MongoDB (documents), Redis (key-value).
 
-**So "MySQL vs NoSQL" is really "one specific relational product vs an entire other family of databases."** The comparison that actually matters is the one from [08-sql-vs-nosql](../08-databases-sql-vs-nosql.md): schema rigidity, relationships, scaling, transactions — not MySQL specifically.
+**So "MySQL vs NoSQL" is really "one specific relational product vs an entire other family of databases."** The comparison that actually matters is the one from [08-sql-vs-nosql](../System-design/08-databases-sql-vs-nosql.md): schema rigidity, relationships, scaling, transactions — not MySQL specifically.
 
 ### MySQL vs NoSQL — the decision, compressed
 
@@ -572,7 +572,7 @@ Easy to conflate these — they're not the same axis.
 | Will this shard across many machines? | Hard — JOINs/ACID don't survive sharding cleanly | Natural — designed for it |
 | Schema changing constantly right now? | Migration on every change | No migration needed |
 
-**In practice:** most systems run both — MySQL/Postgres for the transactional core, MongoDB/Redis alongside for catalogs, sessions, and scale ([08-sql-vs-nosql §10](../08-databases-sql-vs-nosql.md#usecases)).
+**In practice:** most systems run both — MySQL/Postgres for the transactional core, MongoDB/Redis alongside for catalogs, sessions, and scale ([08-sql-vs-nosql §10](../System-design/08-databases-sql-vs-nosql.md#usecases)).
 
 ---
 
@@ -630,7 +630,7 @@ Easy to conflate these — they're not the same axis.
 >
 > Equality first, because the index is sorted, so all matching rows sit in one continuous block — one jump and you're there. The sort field next, because inside that block those rows are *already* in order, so nothing needs sorting. Range last, because a range covers a span of values, and anything after it is scattered across that span with no usable ordering left.
 >
-> **Putting a range before the sort field is the most common indexing mistake** — MongoDB then has to collect everything and sort it in memory, which shows up as a `SORT` stage in `explain()` and **fails outright past 32MB.**
+> **Putting a range before the sort field is the most common indexing mistake** — MongoDB then has to collect everything and sort it in memory, which shows up as a `SORT` stage in `explain()` and, past 100MB, **spills to disk (slow) or fails.**
 >
 > Also worth saying: a compound index only helps if your query uses fields **from the left without skipping any.** `{a, b, c}` helps queries on `a` or `a+b` — never on `b` alone. Like a phone book sorted by surname then first name: finding 'Smith' is instant, finding everyone named 'John' means reading the whole book."
 
@@ -702,7 +702,7 @@ ESR = Equality → Sort → Range
    Sort next      → already in order, so NO sorting needed
    Range last     → a span destroys the ordering of everything after it
 
-⚠️ range before sort = a SORT stage = FAILS past 32MB in memory
+⚠️ range before sort = a SORT stage = spills to disk / FAILS past 100MB in memory
 ```
 
 ### Covered queries
@@ -787,4 +787,4 @@ NoSQL    = everything NOT relational — MongoDB (documents), Redis (key-value)
 
 ---
 
-*— Part 8 of the Node.js notes. Concepts: [08-sql-vs-nosql](../08-databases-sql-vs-nosql.md) · [09-indexing](../09-database-indexing.md) · [10-relationships](../10-database-relationships.md) —*
+*— Part 8 of the Node.js notes. Concepts: [08-sql-vs-nosql](../System-design/08-databases-sql-vs-nosql.md) · [09-indexing](../System-design/09-database-indexing.md) · [10-relationships](../System-design/10-database-relationships.md) —*

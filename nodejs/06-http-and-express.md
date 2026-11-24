@@ -350,7 +350,7 @@ app.use(errorHandler);                    // 11. ALWAYS LAST
 ```js
 app.use(rateLimit({ windowMs: 60_000, max: 100 }));
 ```
-Back it with Redis in production ([05.5-redis-deep-dive.md](../05.5-redis-deep-dive.md)). With `cluster` or multiple containers, in-memory counters mean each of your 8 processes allows 100/min — so your "100" is really 800.
+Back it with Redis in production ([05.5-redis-deep-dive.md](../System-design/05.5-redis-deep-dive.md)). With `cluster` or multiple containers, in-memory counters mean each of your 8 processes allows 100/min — so your "100" is really 800.
 
 ### Graceful shutdown
 ```js

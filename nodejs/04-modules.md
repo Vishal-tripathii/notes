@@ -303,7 +303,7 @@ getAuthor() {
 > "`exports` is a local variable that starts out pointing at `module.exports`, and Node returns `module.exports`. So **mutating works** (`exports.foo = 1`) but **reassigning breaks silently** (`exports = {...}`) — you've only repointed your local variable. I assign to `module.exports` to avoid the ambiguity entirely."
 
 ### Q4. Why can't you `require()` an ES module?
-> "`require` is **synchronous** and ESM loading is **asynchronous** — a sync function can't wait for async work. Historically that throws `ERR_REQUIRE_ESM`; recent Node relaxed it for modules without top-level `await`. The portable answer is dynamic `import()`, which returns a promise and works from CJS. The reverse — ESM importing CJS — has always worked."
+> "`require` is **synchronous** and ESM loading can be **asynchronous** — a sync function can't wait for async work. On older Node that throws `ERR_REQUIRE_ESM`. **Since Node 22.12 (and 20.19), `require()` of an ES module works by default — as long as that module has no top-level `await`.** If it does, you still get an error (`ERR_REQUIRE_ASYNC_MODULE`). The answer that works everywhere is dynamic `import()`, which returns a promise. The reverse — ESM importing CJS — has always worked."
 
 ### Q5. Are Node modules singletons?
 > "Yes — per resolved path, per process. That's why a connection pool or logger at module scope is shared app-wide. **Two caveats:** the same package installed at two different paths in `node_modules` is two separate instances, which breaks `instanceof` checks across the duplicates. And under `cluster`, each process has its own cache — 8 workers means 8 pools, not one shared."
@@ -333,8 +333,8 @@ __dirname ✅                    import.meta.url
 no top-level await              top-level await ✅
 no tree-shaking                 tree-shaking ✅
 
-ESM can import CJS ✅   ·   require(ESM) ✗ (sync can't await async)
-                             → use dynamic import()
+ESM can import CJS ✅   ·   require(ESM) ✅ on Node 22.12+/20.19+ if no top-level await
+                             older Node or top-level await → use dynamic import()
 ```
 
 ### The CJS wrapper — explains everything

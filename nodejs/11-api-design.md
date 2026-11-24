@@ -4,7 +4,7 @@
 
 > **Format:** Q&A — my prompts are the questions, the explanations are the answers.
 >
-> **Concepts elsewhere:** [11-api-design](../11-api-design.md) (system design) · pagination in [Part 9 §3](09-performance.md) · rate limiting in [Part 6 §10](06-http-and-express.md) and [Part 7](07-authentication-and-security.md). **This part goes deep on idempotency, error contracts, and designing a real API** — where the interview actually lives.
+> **Concepts elsewhere:** [11-api-design](../System-design/11-api-design.md) (system design) · pagination in [Part 9 §3](09-performance.md) · rate limiting in [Part 6 §10](06-http-and-express.md) and [Part 7](07-authentication-and-security.md). **This part goes deep on idempotency, error contracts, and designing a real API** — where the interview actually lives.
 
 ---
 
@@ -330,7 +330,7 @@ res.status(500).json({ error: { code: 'INTERNAL_ERROR', requestId } });   // ✅
 >
 > **④ Creation is the hard part** — it charges money, so it must be idempotent. `Idempotency-Key` claimed atomically in Redis with a 24h TTL, storing the response so a retry replays the identical order. Without it, a mobile client on a flaky network double-charges customers.
 >
-> **⑤ Consistency:** creating an order touches inventory, payment and the order record. In one database that's a transaction; across services it's a **saga** with compensating actions — refund if shipping fails ([13-message-queues](../13-message-queues.md), [14-event-driven](../14-event-driven-architecture.md)).
+> **⑤ Consistency:** creating an order touches inventory, payment and the order record. In one database that's a transaction; across services it's a **saga** with compensating actions — refund if shipping fails ([13-message-queues](../System-design/13-message-queues.md), [14-event-driven](../System-design/14-event-driven-architecture.md)).
 >
 > **⑥ Reads:** cursor pagination (order lists grow forever), allowlisted filters and sorts each backed by an index, and an extended reference storing `{userId, name}` on the order so a list render needs no join ([Part 8](08-mongodb-and-mongoose.md)).
 >
@@ -449,4 +449,4 @@ cursor must be OPAQUE (base64) or clients construct their own
 
 ---
 
-*— Part 11 of the Node.js notes. Related: [Part 6 — Express](06-http-and-express.md) · [Part 8 — MongoDB](08-mongodb-and-mongoose.md) · [Part 9 — Performance](09-performance.md) · [11-api-design](../11-api-design.md) —*
+*— Part 11 of the Node.js notes. Related: [Part 6 — Express](06-http-and-express.md) · [Part 8 — MongoDB](08-mongodb-and-mongoose.md) · [Part 9 — Performance](09-performance.md) · [11-api-design](../System-design/11-api-design.md) —*

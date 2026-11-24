@@ -210,7 +210,7 @@ await redis.setex(key, 300, JSON.stringify(user));   // ⚠️ you just cached n
 
 **Redis is a database that keeps everything in memory instead of on disk.** That's why it answers in about a millisecond while a normal database takes tens of milliseconds — no disk involved.
 
-Concepts in [05.5-redis-deep-dive](../05.5-redis-deep-dive.md). What matters in Node:
+Concepts in [05.5-redis-deep-dive](../System-design/05.5-redis-deep-dive.md). What matters in Node:
 
 ## Name your keys predictably
 ```js
