@@ -113,18 +113,18 @@ QUERY (per question):    question → embed → search Qdrant (top-K) → chunks
 
 Add these one at a time — each teaches a concept and upgrades the app:
 
-| Add-on | Teaches (phase) | Impact |
+| Add-on | Teaches (part) | Impact |
 |---|---|---|
-| **Reranker** (`bge-reranker` / Cohere) | Advanced Retrieval (6) | Biggest single quality jump: retrieve top-20 → rerank to top-3. |
-| **Hybrid search** (dense + sparse) | Advanced Retrieval (6) | Qdrant supports it natively; catches exact terms (codes, names). |
-| **Query rewriting / expansion** | Advanced Retrieval (6) | Fixes vague + conversational queries. |
-| **Parent-child chunking** | Ingestion (4) | Precise matching + full context to the LLM. |
-| **Self-hosted LLM** (Ollama Llama 3) | Production (16) | Privacy + zero API cost; a strong portfolio story. |
-| **Evaluation** (RAGAS) | Evaluation (13) | Measure faithfulness + retrieval accuracy; prove it works. |
-| **Observability** (LangSmith) | Observability (14) | Trace every step, token cost, latency. |
-| **Agentic RAG** (LangGraph) | Agents (8) / Adv RAG (7) | Agent *decides* whether/what to retrieve, judges results, retries. |
-| **Guardrails** (input/output validation) | Security (15) | Handle prompt injection from ingested docs. |
-| **Caching** (prompt / embedding cache) | Production (16) | Cut cost + latency on repeated queries. |
+| **Reranker** (`bge-reranker` / Cohere) | [Part 07](07-advanced-retrieval.md) | Biggest single quality jump: retrieve top-20 → rerank to top-3. |
+| **Hybrid search** (dense + sparse) | [Part 07](07-advanced-retrieval.md) | Qdrant supports it natively; catches exact terms (codes, names). |
+| **Query rewriting / expansion** | [Part 07](07-advanced-retrieval.md) | Fixes vague + conversational queries. |
+| **Parent-child chunking** | [Part 05](05-document-ingestion.md) | Precise matching + full context to the LLM. |
+| **Self-hosted LLM** (Ollama Llama 3) | [Part 16](16-production-ai.md) | Privacy + zero API cost; a strong portfolio story. |
+| **Evaluation** (RAGAS) | [Part 14](14-evaluation-and-observability.md) | Measure faithfulness + retrieval accuracy; prove it works. |
+| **Observability** (LangSmith) | [Part 14](14-evaluation-and-observability.md) | Trace every step, token cost, latency. |
+| **Agentic RAG** (LangGraph) | [Part 09](09-ai-agents.md) / [Part 08](08-advanced-rag.md) | Agent *decides* whether/what to retrieve, judges results, retries. |
+| **Guardrails** (input/output validation) | [Part 15](15-ai-security.md) | Handle prompt injection from ingested docs. |
+| **Caching** (prompt / embedding cache) | [Part 16](16-production-ai.md) | Cut cost + latency on repeated queries. |
 
 ---
 
@@ -132,10 +132,10 @@ Add these one at a time — each teaches a concept and upgrades the app:
 
 - "I built RAG **raw** first to understand the internals, then layered abstractions." (shows depth)
 - "Embeddings run in-process for now; I'd split them into a **separate service** to scale independently." (shows scaling awareness)
-- "Retrieval quality was the bottleneck, so I added a **cross-encoder reranker** and **hybrid search**." (shows Phase-6 mastery)
+- "Retrieval quality was the bottleneck, so I added a **cross-encoder reranker** and **hybrid search**." (shows advanced-retrieval depth)
 - "I ground answers strictly to retrieved context with **citations** and an 'I don't know' fallback." (shows you get hallucination control)
 - "Swapped OpenAI for a **self-hosted Llama 3** to show a privacy-friendly deployment." (shows range)
 
 ---
 
-_This project exercises Phases 1–6, 8, and 13–16 of the [AI Engineering notes](ai-engineering-notes.md)._
+_This project exercises Parts 01–07, 09, 12 and 14–16 of the [AI Engineering notes](00-ROADMAP.md)._
