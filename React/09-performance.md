@@ -192,7 +192,7 @@ The neatest escape, where applicable, is the functional state update — `setCou
 
 Finally, `useCallback` is never needed for `useState`'s setter or `useReducer`'s `dispatch` — both already have stable identities that React guarantees.
 
-> **🆕 Looking ahead:** the **React Compiler** (React 19) applies these optimizations automatically at build time, which will make most manual `useMemo` and `useCallback` unnecessary. Worth mentioning in an interview as awareness of where things are heading; don't assume any given project has it enabled.
+> **🆕 The React Compiler:** a separate build-time plugin (not part of React 19 itself; **stable v1.0 since October 2025**, works with React 17–19) that adds memoization automatically, making most manual `useMemo`, `useCallback` and `React.memo` unnecessary. It needs code that follows the Rules of React; its ESLint plugin reports what it can't optimise. Mention it as current practice — but don't assume any given project has it enabled.
 
 ---
 
@@ -654,7 +654,7 @@ useCallback     === useMemo(() => fn, deps)
                    plain DOM element ❌ · non-memo child ❌
                 missing deps → stale closure (same bug as useEffect)
                 never needed for setState / dispatch
-                🆕 React 19 Compiler auto-memoizes most of this
+                🆕 React Compiler (build plugin, stable Oct 2025) auto-memoizes most of this
 
 THE BUNDLE      one file with everything → the homepage visitor downloads the
                 admin panel, chart library and editor before anything renders

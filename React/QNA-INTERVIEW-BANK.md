@@ -2,7 +2,7 @@
 
 > **How to use:** cover the answer, say yours out loud, then compare — speaking still finds gaps that reading hides. But unlike a plain drill sheet, this bank is written to work as a **standalone crash course**: every answer opens with a plain definition, then the tradeoff/reasoning behind it, then a short code snippet wherever the concept has real shape in code. If someone has time for exactly one file before an interview and never opens the rest of the `React/` notes folder, this is the one that gets them ready.
 >
-> **~202 questions · 25 sections**
+> **~230 questions · 34 sections**
 
 ---
 
@@ -23,8 +23,8 @@
 | 11 | [Re-rendering](#s11) | [Part 08](08-rendering-internals-and-vdom.md), [09](09-performance.md) |
 | 12 | [Performance](#s12) | [Part 09](09-performance.md) |
 | 13 | [Event System](#s13) | — |
-| 14 | [Forms](#s14) | [Part 02](02-components.md) |
-| 15 | [Routing](#s15) | — |
+| 14 | [Forms](#s14) | [Part 02](02-components.md), [16](16-forms.md) |
+| 15 | [Routing](#s15) | [Part 15](15-routing-react-router.md) |
 | 16 | [Build System](#s16) | [Part 09](09-performance.md) |
 | 17 | [React Internals](#s17) ⭐ | [Part 08](08-rendering-internals-and-vdom.md) |
 | 18 | [React 18+](#s18) | [Part 07](07-hooks.md), [08](08-rendering-internals-and-vdom.md) |
@@ -33,10 +33,19 @@
 | 21 | [Custom Hooks](#s21) | [Part 07](07-hooks.md), [10](10-hoc.md) |
 | 22 | [Error Handling](#s22) | [Part 06](06-lifecycle.md), [12](12-async-javascript.md) |
 | 23 | [Data Fetching & Server State](#s23) | [Part 12](12-async-javascript.md), [11](11-state-management.md) |
-| 24 | [Testing](#s24) | — |
+| 24 | [Testing](#s24) | [Part 18](18-testing.md) |
 | 25 | [Scenario & Debugging](#s25) ⭐ | — |
+| 26 | [React 19 & 19.2](#s26) ⭐ | [Part 13](13-react-19-and-19-2.md) |
+| 27 | [Server Components & Next.js](#s27) ⭐ | [Part 14](14-server-components-and-nextjs.md) |
+| 28 | [Routing — modern bits](#s28) | [Part 15](15-routing-react-router.md) |
+| 29 | [Forms — modern bits](#s29) | [Part 16](16-forms.md) |
+| 30 | [TanStack Query & Redux Toolkit](#s30) ⭐ | [Part 17](17-data-fetching-tanstack-query-and-redux-toolkit.md) |
+| 31 | [Testing — in depth](#s31) ⭐ | [Part 18](18-testing.md) |
+| 32 | [TypeScript with React](#s32) | [Part 19](19-typescript-with-react.md) |
+| 33 | [Portals, Refs & Modals](#s33) | [Part 20](20-portals-refs-and-modals.md) |
+| 34 | [Styling & Accessibility](#s34) | [Part 21](21-styling-and-accessibility.md) |
 
-> Sections 13, 15 and 24 aren't covered by a dedicated note file in this folder — the answers here are self-contained, drawing on general React/tooling knowledge where the notes don't reach.
+> Section 13 (event system) has no dedicated note file; its answers are self-contained. Sections 26–34 were added in the gap review (Nov 2026), updated to React 19.2.
 
 ---
 
@@ -1032,9 +1041,12 @@ React's ability to prepare a UI update in the background — pausing, resuming, 
 Automatic batching means React groups **every** state update occurring within one tick into a single re-render, no matter where in the code those updates originated. Before React 18, batching only happened *inside React's own event handlers* — a `setState` call inside a `setTimeout` callback, a raw promise `.then()`, or a listener attached directly with `addEventListener` (bypassing React's synthetic event system) each triggered its own separate render, because those code paths never passed through React's batching wrapper. React 18's `createRoot` routes every update through the scheduler uniformly, so the exact same code that used to cause two renders in a `.then()` callback now causes just one.
 
 ```jsx
-setQuery(value);                            // urgent — the input must update now
-startTransition(() => setResults(filter(value)));   // marked non-urgent, interruptible
+setQuery(value);                              // urgent — the input must update now
+startTransition(() => setFilter(value));      // only the state update is non-urgent
+// …and the expensive filtering happens during render: useMemo(() => filterHuge(filter), [filter])
 ```
+
+⚠️ `startTransition(() => setResults(filterHuge(value)))` is a common mistake — the callback runs synchronously, so the filtering still blocks. Transitions make the **re-render** interruptible, not the callback's code.
 
 ### What does `startTransition()` do, and how is `useTransition()` different from it?
 `startTransition(callback)` marks the state update(s) inside `callback` as **non-urgent** — React keeps the current UI fully interactive while it renders the new one in the background, and will interrupt that background render entirely if something more urgent (a keystroke, a click) arrives in the meantime. `useTransition()` is the hook form of the same capability, additionally returning an `isPending` boolean you can use to show a subtle loading indicator specifically for the in-flight, non-urgent update, without blocking anything else.
@@ -1048,7 +1060,7 @@ const results = useMemo(() => filterHuge(deferredQuery), [deferredQuery]);
 ```
 
 ### What is Suspense, and what does it actually mean for a component to "suspend"?
-Suspense is a boundary component that renders a fallback UI while something below it in the tree isn't ready yet — originally built for `React.lazy` code-loading, and now used more broadly for data fetching in frameworks that integrate with it, and for streaming server rendering. Mechanically, a component "suspends" by throwing a pending promise during render; the nearest ancestor `Suspense` catches it (the same underlying mechanism as an error boundary catching a thrown error) and shows its fallback until that promise resolves, at which point React re-renders the real content in its place.
+Suspense is a boundary component that renders a fallback UI while something below it in the tree isn't ready yet — originally built for `React.lazy` code-loading, and now used more broadly for data fetching in frameworks that integrate with it, and for streaming server rendering. Under the hood, a suspending component signals "not ready" during render and the nearest ancestor `Suspense` shows its fallback until the data is ready, then re-renders the real content (historically implemented by throwing a promise — the same kind of mechanism as error boundaries catching a thrown error). ⚠️ That's an **internal detail, not an API you should use yourself.** The supported ways to suspend for data are React 19's **`use(promise)`** ([Part 13](13-react-19-and-19-2.md)), Server Components, or a Suspense-enabled library or framework (TanStack Query's `useSuspenseQuery`, Next.js, React Router). `React.lazy` suspends for code.
 
 ### What is hydration, and what is selective hydration specifically an improvement over?
 Hydration is the process of attaching React to server-rendered HTML that's already sitting in the DOM — building the fiber tree over the *existing* markup and wiring up event listeners, rather than tearing it down and recreating it from scratch on the client. **Selective hydration** improves on plain hydration by letting different parts of the page hydrate independently and out of order, prioritized by where the user actually interacts — clicking a component that hasn't finished hydrating yet causes React to hydrate *that* part first, ahead of whatever order it would otherwise have followed. Before selective hydration, hydration was effectively all-or-nothing: one large, slow section anywhere on the page could block the entire page from becoming interactive.
@@ -1307,7 +1319,145 @@ It tells React: "I'm about to trigger one or more updates — process all of the
 **What's wrong (on React 17 and earlier specifically):** an inconsistency in when batching applied. **Why:** batching only happened *inside React's own event handlers* pre-18 — a `setState` inside a `setTimeout` callback, a raw promise `.then()`, or a native (non-React) event listener each triggered its own separate render, because those code paths never passed through React's batching wrapper, producing extra renders and sometimes visibly inconsistent intermediate states. **Fix:** React 18's automatic batching (via `createRoot`) closed this gap entirely — the exact same code now batches uniformly no matter where the `setState` call physically originates.
 
 ### "Why does my component render twice in development, but not in production?"
-**What's wrong:** nothing — this is expected, deliberate behavior, not a bug to work around. **Why:** React 18 Strict Mode intentionally double-invokes components and effects in development specifically to surface impurity and missing effect cleanup before either reaches production, where the same underlying bug would instead show up intermittently and be far harder to reproduce and diagnose. **What to actually do about it:** if the double-invocation causes a *visibly broken* result — two subscriptions instead of one, two network requests firing instead of one — that indicates a genuine bug (usually missing or incorrect effect cleanup) that would also eventually surface in production whenever that effect happens to re-run for a real reason; the fix is proper cleanup, never suppressing the double-invocation itself with a `useRef` "has already run" flag, which hides the diagnostic without addressing the actual defect.
+**What's wrong:** nothing — this is expected, deliberate behavior, not a bug to work around. **Why:** Strict Mode (React 18+; in React 19 it also double-invokes ref callbacks) intentionally double-invokes components and effects in development specifically to surface impurity and missing effect cleanup before either reaches production, where the same underlying bug would instead show up intermittently and be far harder to reproduce and diagnose. **What to actually do about it:** if the double-invocation causes a *visibly broken* result — two subscriptions instead of one, two network requests firing instead of one — that indicates a genuine bug (usually missing or incorrect effect cleanup) that would also eventually surface in production whenever that effect happens to re-run for a real reason; the fix is proper cleanup, never suppressing the double-invocation itself with a `useRef` "has already run" flag, which hides the diagnostic without addressing the actual defect.
+
+---
+
+<a name="s26"></a>
+# 26. ⭐ React 19 & 19.2
+
+### What are Actions in React 19?
+Async functions run inside a transition, which React tracks for you — pending state, errors, optimistic updates. `startTransition` now accepts an async function (with `isPending` true until it finishes), and you can pass a function as a form's `action`: React calls it with the `FormData`, and resets uncontrolled fields on success. The new hooks build on this and replace the hand-written `isPending`/`error` boilerplate.
+
+```jsx
+<form action={async (formData) => { await api.subscribe(formData.get('email')); }}>
+  <input name="email" /><button>Subscribe</button>
+</form>
+```
+
+### `useActionState`, `useFormStatus`, `useOptimistic` — one line each?
+**`useActionState(fn, initial)`** → `[state, formAction, isPending]`, where `fn(prevState, formData)` returns the next state (e.g. an error message). **`useFormStatus()`** (from `react-dom`) gives `{ pending }` of the **parent** form — for a reusable submit button rendered inside it. **`useOptimistic(value, apply)`** gives a value you can change immediately inside an action; when the action ends, React shows the real value again, so a failed request undoes the optimistic change automatically.
+
+### What is `use()`?
+Reads a **promise** (suspending until it resolves, throwing to an error boundary if it rejects) or a **context** — and unlike hooks it may be called conditionally. ⚠️ The promise must be **stable** — created outside the component (by a Server Component, a cache, a router loader); creating it during render loops forever. For everyday client fetching, TanStack Query is still the tool.
+
+### `ref` as a prop — does that kill `forwardRef`?
+In React 19, function components receive `ref` as a normal prop, so new code doesn't need `forwardRef`. It is **not deprecated yet** — that's planned. Ref callbacks can also return a **cleanup** function. Other React 19 changes: `<Context value>` as the provider, `<title>`/`<meta>` rendered anywhere and hoisted to `<head>`, better hydration error diffs, root `onCaughtError`/`onUncaughtError`, and removal of `ReactDOM.render`, `findDOMNode`, string refs, legacy context and `propTypes`/`defaultProps` on function components (upgrade via 18.3 first).
+
+### What do `<Activity>` and `useEffectEvent` (React 19.2) do?
+**`<Activity mode="hidden">`** hides part of the tree **without unmounting** it: state is kept, effects are cleaned up while hidden, updates are low priority — between `&&` (destroys state) and CSS hiding (keeps effects running). **`useEffectEvent(fn)`** lets an effect read the **latest** props/state without listing them as dependencies — e.g. use the current theme in a "connected" toast without reconnecting the chat when the theme changes. More: [Part 13](13-react-19-and-19-2.md).
+
+### What is the React Compiler?
+A **separate build-time plugin** (not part of React 19 itself) that automatically memoizes components and values, making most manual `useMemo`/`useCallback`/`React.memo` unnecessary. Stable v1.0 since **October 2025**, works with React 17–19, requires code that follows the Rules of React (pure render, no mutation). Don't assume a project has it on.
+
+---
+
+<a name="s27"></a>
+# 27. ⭐ Server Components & Next.js
+
+### Server Components vs Client Components?
+**Server Components** run only on the server (or at build time): they can be `async`, read the database directly, keep secrets, and ship **no JavaScript** to the browser — but have no state, effects or event handlers. **Client Components** (`'use client'` at the top of the file) are the interactive parts; they run in the browser and are server-rendered for the first load. Keep pages as Server Components and push `'use client'` down to the small interactive leaves. "Server = fetch & show; Client = click & change."
+
+### Is a Server Component the same as SSR?
+No. SSR renders components (including Client Components) to **HTML** for the first load, then hydrates them. Server Components never run in the browser at all — they send a serialised result, also on later client-side navigations. An App Router page uses both.
+
+### What are the composition rules across the boundary?
+Server can render Client ✅. Props from server to client must be **serialisable** (no regular functions, no class instances). A Client Component **can't import** a Server Component, but a Server Component **can be passed in as `children`** (or another prop) ✅.
+
+### What is a Server Action, and what's the security catch?
+An async function marked `'use server'`, callable from the client — commonly as a `<form action>` — with React handling the request. **Every one is a public HTTP endpoint**: authenticate, authorise and validate inside it on every call; hiding a button protects nothing. After a mutation, `revalidatePath`/`revalidateTag` refresh cached pages.
+
+### What causes a hydration mismatch?
+The client's first render differs from the server HTML — `Date`/`Math.random()` in render, `typeof window` branches, locale/time-zone differences, invalid HTML (`<div>` in `<p>`), browser extensions. Fix: render browser-only values after mount, pass values from the server, fix markup, use `useId` for ids.
+
+### SSR vs SSG vs ISR vs streaming?
+SSR: per request. SSG: once at build time. ISR: SSG that regenerates in the background on a timer or on demand. Streaming: the shell is sent first, each `<Suspense>` section streams in when its data is ready (Next.js `loading.tsx`). Next.js lets you choose per route. (Caching defaults changed: Next 15 made `fetch` uncached by default; Next 16 added `'use cache'`.) More: [Part 14](14-server-components-and-nextjs.md).
+
+---
+
+<a name="s28"></a>
+# 28. Routing — the modern bits
+
+### What are loaders and actions in React Router?
+In data routers (`createBrowserRouter`, v6.4+), a route's **loader** fetches its data **before** it renders — loaders of all matched routes run **in parallel**, removing `useEffect` waterfalls — read with `useLoaderData()`. An **action** handles a `<Form method="post">` submission; afterwards the loaders re-run automatically. Errors go to the route's `errorElement`. `useFetcher` calls loaders/actions without navigating.
+
+### What changed in React Router v7?
+Remix merged into it; import from `react-router`. Three modes: **declarative** (`<BrowserRouter>`/`<Routes>`, v6 style), **data** (loaders/actions), and **framework** (Vite plugin, file routes, SSR, type-safe loader data — a Next.js alternative). v6 code mostly keeps working. More: [Part 15](15-routing-react-router.md).
+
+---
+
+<a name="s29"></a>
+# 29. Forms — the modern bits
+
+### How would you build a large form with validation?
+**React Hook Form** + a **zod** schema via `zodResolver`. RHF keeps inputs uncontrolled (no re-render of the whole form per keystroke); zod holds all rules — including cross-field `refine` — gives the TypeScript type via `z.infer`, and can be **reused on the server**. `useFieldArray` for dynamic rows (key by `field.id`, not index), `Controller` for UI-library inputs, `setError` for server-side errors, `mode: 'onTouched'` for friendly timing, plus accessible labels and linked error messages.
+
+### Do React 19 form actions replace React Hook Form?
+For simple forms — especially with Server Actions — `<form action>` + `useActionState` is often enough and works before JavaScript loads. For big forms with live validation, field arrays and complex inputs, React Hook Form is still better. They can be combined. More: [Part 16](16-forms.md).
+
+---
+
+<a name="s30"></a>
+# 30. ⭐ TanStack Query & Redux Toolkit
+
+### Why TanStack Query instead of `useEffect` fetching?
+`useEffect` fetching has no caching, no de-duplication, no background refresh of stale data, no retries or refetch-on-focus, no pagination or optimistic-update helpers — and you handle race conditions yourself. TanStack Query treats server data as a **cache keyed by query keys**.
+
+### What is a query key? `staleTime` vs `gcTime`?
+The key (`['users', id]`) is the data's identity: same key → shared, de-duplicated; key changes → refetch; hierarchical, so invalidating `['users']` refreshes all user queries. Put every variable the `queryFn` uses in it. **`staleTime`** = how long data is fresh (served from cache with no refetch; default 0). **`gcTime`** (was `cacheTime`) = how long unused data stays in memory (default 5 min). Stale data is still shown — it's just refetched in the background. (v5 also renamed `isLoading` → `isPending`.)
+
+### How do you do an optimistic update with TanStack Query?
+`onMutate`: cancel queries for the key → snapshot with `getQueryData` → write the optimistic value with `setQueryData` → return the snapshot. `onError`: restore it. `onSettled`: `invalidateQueries` to re-sync.
+
+### What does Redux Toolkit change?
+`createSlice` generates actions and the reducer, and uses Immer so "mutating" code is safe inside reducers; `configureStore` adds DevTools and middleware; **RTK Query** handles server data with generated hooks and tag-based invalidation. Keep `useSelector` narrow (memoise derived data with `createSelector`). Use Redux for large shared client state — not for server data. More: [Part 17](17-data-fetching-tanstack-query-and-redux-toolkit.md).
+
+---
+
+<a name="s31"></a>
+# 31. Testing — in depth
+
+### `getBy` vs `queryBy` vs `findBy`, and why `getByRole`?
+**get** = must be there now (throws); **query** = may be absent (returns `null` — for "not in the document"); **find** = will appear (returns a promise — after a fetch). Prefer **`getByRole('button', { name: 'Save' })`** and `getByLabelText` — they find elements the way users and assistive tech do, survive markup changes, and push you towards accessible HTML; `getByTestId` is the last resort.
+
+### How do you test a component that fetches data?
+Mock the network with **MSW** (`http.get(...)` handlers; the real fetch/axios/Query code runs), render inside a **fresh `QueryClient` per test with `retry: false`** (plus `MemoryRouter`/store as needed), assert the loading state, then `await screen.findBy…` the data. For errors, `server.use()` a 500 handler in that test. Interact with `userEvent.setup()` and **await** every call.
+
+### What does "not wrapped in act(...)" mean?
+A state update happened after the test stopped waiting — usually an async result. Fix by awaiting the right thing (`findBy`, `await user.click`), not by wrapping random code in `act`. Hooks: `renderHook` (now in `@testing-library/react`). Avoid implementation details, giant snapshots and mocking child components. E2E with Playwright for a few critical flows. More: [Part 18](18-testing.md).
+
+---
+
+<a name="s32"></a>
+# 32. TypeScript with React
+
+### How do you type `children`, events and a `useState` that starts null?
+`children: React.ReactNode`. Events: `React.ChangeEvent<HTMLInputElement>`, `React.FormEvent<HTMLFormElement>`, `React.MouseEvent<HTMLButtonElement>` (or write the handler inline and let TS infer). State: `useState<User | null>(null)`, `useState<Item[]>([])`. Refs: `useRef<HTMLInputElement>(null)` then `ref.current?.focus()`.
+
+### How do you build a `Button` that accepts all native button props?
+`type Props = React.ComponentProps<'button'> & { variant?: 'primary' | 'ghost' }`, destructure your own props and spread `...rest` onto `<button>`; `Omit` to redefine a native prop. Context: `createContext<T | undefined>(undefined)` plus a `useX()` hook that throws outside the provider and returns the narrowed type. Generic components: `function List<T>(props: ListProps<T>)`. Discriminated-union props make invalid combinations compile errors. More: [Part 19](19-typescript-with-react.md).
+
+---
+
+<a name="s33"></a>
+# 33. Portals, Refs & Modals
+
+### What is a portal, and does a click inside it bubble to React parents?
+`createPortal(children, document.body)` renders into another DOM node while keeping the component's place in the React tree (props, state, context unchanged) — for modals, tooltips, toasts, so ancestors' `overflow: hidden`/stacking contexts can't clip them. **Yes**, events bubble through the **React** tree, so a React parent's `onClick` fires even though the DOM is elsewhere.
+
+### How do you build an accessible modal?
+Portal; `role="dialog"`, `aria-modal`, `aria-labelledby`; move focus in on open, trap Tab, close on Escape, return focus to the opener, make the background inert and non-scrolling. Practically: the native **`<dialog>`** with `showModal()` (top layer, backdrop, Escape, inert) or a headless library (Radix, React Aria). For a dynamic list of refs, use `useRef(new Map())` with callback refs. More: [Part 20](20-portals-refs-and-modals.md).
+
+---
+
+<a name="s34"></a>
+# 34. Styling & Accessibility
+
+### How do you style React components, and why?
+Commonly **Tailwind** (utility classes, consistent tokens, tiny CSS) or **CSS Modules** (scoped classes, plain CSS, zero runtime), with **headless** libraries (Radix, React Aria — or shadcn/ui) for complex widgets. Runtime CSS-in-JS (styled-components, Emotion) adds runtime cost and friction with Server Components; zero-runtime options (vanilla-extract, Panda, StyleX) keep CSS-in-TS without it. Don't build Tailwind class names dynamically.
+
+### How do you make a React app accessible?
+Semantic elements (a real `<button>`, never `<div onClick>`), ARIA only for custom widgets, full keyboard support with visible focus, deliberate focus management (modals, deletes, route changes — focus the new `<h1>`), labelled form fields with linked errors, `aria-live` regions for dynamic messages. Tools: `eslint-plugin-jsx-a11y`, role-based tests, axe in CI, plus keyboard and screen-reader checks. Target WCAG 2.2 AA. More: [Part 21](21-styling-and-accessibility.md).
 
 ---
 
@@ -1317,6 +1467,8 @@ It tells React: "I'm about to trigger one or more updates — process all of the
 1. Cover the answers. Say yours ALOUD. Section 25 first — least memorisable.
 2. Stumble on one → open the linked Part, reread that section only.
 3. Highest yield: 4 (reconciliation), 8 (Fiber), 17 (internals), 20 (the whys), 25 (scenarios).
+   For a 3–4 years role add: 26 (React 19), 27 (Server Components / Next.js),
+   30 (TanStack Query), 31 (testing), 29 (forms).
 4. Then build something. Notes stop helping before an interview does.
 ```
 

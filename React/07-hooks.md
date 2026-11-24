@@ -1008,7 +1008,7 @@ const inc = useCallback(() => setCount(c => c + 1), []);  // no `count` needed
 
 **Never needed:** `useState`'s setter and `useReducer`'s `dispatch` — already stable.
 
-> **Looking ahead:** the **React Compiler** (React 19) applies these optimizations automatically at build time, which will make most manual `useMemo`/`useCallback` unnecessary. Worth mentioning in interviews; don't assume it's enabled in a given project.
+> **🆕 The React Compiler:** a **separate build-time tool** (a Babel/bundler plugin, `babel-plugin-react-compiler`) — not part of React 19 itself. It analyses your components and adds memoization automatically, so most manual `useMemo`/`useCallback`/`React.memo` becomes unnecessary. **Version 1.0 became stable in October 2025**, and it works with React 17, 18 and 19 (older versions need a small runtime package). It requires your components to follow the Rules of React (pure render, no mutating props/state) — the ESLint plugin flags code it can't optimise. Don't assume a given project has it enabled; in one that does, prefer plain code over hand-written memoization.
 
 ---
 
@@ -1181,7 +1181,7 @@ const MyInput = forwardRef(function MyInput(props, ref) {
 });
 ```
 
-**🆕 React 19:** `ref` became a normal prop for function components — `function MyInput({ ref })` works, and `forwardRef` is deprecated. Existing codebases are still full of it.
+**🆕 React 19:** `ref` became a normal prop for function components — `function MyInput({ ref }) { return <input ref={ref} /> }` just works, so `forwardRef` is **no longer needed** in new code. It is **not deprecated yet** — the React team has said it will be deprecated in a future version (with a codemod). Existing codebases are full of it, and it's required on React 18 and older.
 
 ## `useImperativeHandle`
 
@@ -1240,16 +1240,34 @@ The id derives from the component's position in the tree, so server and client a
 **After:**
 
 ```jsx
+const [query, setQuery] = useState('');
+const [filter, setFilter] = useState('');
 const [isPending, startTransition] = useTransition();
 
 function handleChange(e) {
-  setQuery(e.target.value);                       // URGENT — the input must feel instant
+  setQuery(e.target.value);                 // URGENT — the input must feel instant
   startTransition(() => {
-    setResults(filterHugeList(e.target.value));   // NON-URGENT — interruptible
+    setFilter(e.target.value);              // NON-URGENT — only the STATE UPDATE goes in here
   });
 }
 
+// the expensive work happens DURING RENDER — that's the part React can interrupt
+const results = useMemo(() => filterHugeList(filter), [filter]);
+
 {isPending && <Spinner />}
+```
+
+> ⚠️ **Common mistake:** `startTransition(() => setResults(filterHugeList(value)))`. The callback itself runs **immediately and synchronously** — so `filterHugeList` still freezes the page before the transition even starts. A transition makes the **re-render** that follows the state update interruptible, not the code you write inside the callback. Put only `setState` inside; do the heavy computing during render (where React can pause and throw it away).
+>
+> 🧠 **Remember:** **"transition the update, compute in render."**
+
+Since React 19 the callback can also be **async** — the transition (and `isPending`) lasts until the promise finishes. This is the basis of **Actions** ([Part 13](13-react-19-and-19-2.md)):
+
+```jsx
+startTransition(async () => {
+  await saveName(name);           // isPending stays true while this runs
+  startTransition(() => setSaved(true));   // state set after an await must be wrapped again (for now)
+});
 ```
 
 ## `useDeferredValue`
@@ -1292,6 +1310,10 @@ const isOnline = useSyncExternalStore(
 ```
 
 Primarily used *by* state libraries (Zustand, Redux) rather than in app code — but it's why they work correctly with concurrent features.
+
+## 🆕 The React 19 / 19.2 hooks
+
+`useActionState`, `useFormStatus`, `useOptimistic`, the `use()` API, and React 19.2's `useEffectEvent` (read the latest props/state inside an effect without re-running it) are covered in **[Part 13 — React 19 & 19.2](13-react-19-and-19-2.md)**.
 
 ## `useInsertionEffect`
 
@@ -1361,10 +1383,10 @@ Only library authors need it. Know it exists.
 > *"Both persist across renders, but changing a ref doesn't trigger a re-render and you mutate `.current` in place rather than replacing the value. Use state when the UI must reflect the value; use a ref for bookkeeping the UI doesn't show — DOM nodes, timer ids, previous values, instance flags. Reading or writing a ref during render is impure; do it in effects or handlers."*
 
 ### Q: "useEffect vs useLayoutEffect?"
-> *"`useEffect` runs asynchronously after the browser paints; `useLayoutEffect` runs synchronously before paint. Use layout effects only when you measure the DOM and immediately change it — otherwise the user sees a flash of the pre-adjustment layout. Because it blocks painting, slow work there freezes the UI, and it doesn't run during SSR."*
+> *"`useEffect` usually runs after the browser paints (though for updates caused by a discrete input like a click, React may run it before paint); `useLayoutEffect` always runs synchronously before paint. Use layout effects only when you measure the DOM and immediately change it — otherwise the user sees a flash of the pre-adjustment layout. Because it blocks painting, slow work there freezes the UI, and it doesn't run during SSR."*
 
 ### Q: "What is `forwardRef` and is it still needed?"
-> *"It lets a parent's ref pass through a component to a DOM node inside it, since `ref` isn't a normal prop. Essential for design-system components wrapping native elements. In React 19 `ref` became a regular prop for function components and `forwardRef` is deprecated, but existing code is full of it."*
+> *"It lets a parent's ref pass through a component to a DOM node inside it, since `ref` isn't a normal prop. Essential for design-system components wrapping native elements. In React 19 `ref` became a regular prop for function components, so new code doesn't need `forwardRef` — it isn't formally deprecated yet, but that's planned — and existing code is full of it."*
 
 ### Q: "What problem does `useId` solve?"
 > *"Generating ids for accessibility attributes like `htmlFor` and `aria-describedby` without breaking SSR. A random id differs between server and client and causes a hydration mismatch; `useId` produces the same stable value on both. It's per component instance, so it must not be used for list keys."*
@@ -1453,7 +1475,7 @@ useCallback     cache a FUNCTION.  useCallback(fn, deps) === useMemo(() => fn, d
                 🔥 USELESS ALONE — needs React.memo child / effect dep / hook dep
                 ❌ missing deps → stale closure · a dep that changes every render
                 never needed for setState or dispatch (already stable)
-                React 19 Compiler auto-memoizes → most manual memo becomes unnecessary
+                React Compiler (separate build tool, stable v1.0 Oct 2025) auto-memoizes
 
 useRef          a box that SURVIVES renders and does NOT trigger one
                 BEFORE: local var (lost each render) vs state (needless re-render)
@@ -1469,7 +1491,7 @@ useRef          a box that SURVIVES renders and does NOT trigger one
 useLayoutEffect  before PAINT, synchronous → measure + adjust DOM, no flash
                  blocks painting · no SSR
 forwardRef       pass a ref through to an inner DOM node (ref isn't a normal prop)
-                 🆕 React 19: ref IS a normal prop; forwardRef deprecated
+                 🆕 React 19: ref IS a normal prop → forwardRef not needed (deprecation planned, not yet)
 useImperativeHandle  expose chosen methods via ref instead of the DOM node
                  escape hatch — component libraries only
 useId            stable SSR-safe id for htmlFor/aria — ❌ NOT for list keys

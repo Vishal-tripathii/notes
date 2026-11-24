@@ -354,7 +354,25 @@ async function handleClick() {
 
 - **Granularity matters.** One boundary at the root = still a full-page fallback. Wrap risky sections individually so one broken widget doesn't take down the page.
 - **Add a reset.** A "Try again" button that clears `hasError`, often keyed so the subtree remounts.
-- **Still class-only.** No hook equivalent. The standard solution is the **`react-error-boundary`** package, which wraps a class and gives a clean hooks-friendly API.
+- **Still class-only.** No hook equivalent, even in React 19. The standard solution is the **`react-error-boundary`** package, which wraps a class and gives a clean hooks-friendly API:
+  ```jsx
+  import { ErrorBoundary } from 'react-error-boundary';
+
+  <ErrorBoundary
+    fallbackRender={({ error, resetErrorBoundary }) => (
+      <div role="alert">
+        <p>Something went wrong: {error.message}</p>
+        <button onClick={resetErrorBoundary}>Try again</button>
+      </div>
+    )}
+    onError={(error, info) => logToSentry(error, info.componentStack)}
+    resetKeys={[userId]}            // reset automatically when userId changes
+  >
+    <Dashboard userId={userId} />
+  </ErrorBoundary>
+  ```
+  Its `useErrorBoundary()` hook lets an event handler or async code **push** an error into the nearest boundary (`showBoundary(error)`) — the usual way to send async failures to a boundary.
+- **🆕 React 19 root error callbacks:** `createRoot(el, { onCaughtError, onUncaughtError, onRecoverableError })` — one place to report every error React sees (caught by a boundary, uncaught, or recovered from during hydration) to your monitoring tool. React 19 also logs each error **once** instead of the old duplicate console noise.
 
 ---
 
@@ -416,7 +434,9 @@ In a class you'd need three methods (`componentDidMount`, `componentDidUpdate` w
 
 ## ⚠️ The timing difference nobody mentions
 
-`componentDidMount` runs **before** the browser paints. `useEffect` runs **after** it paints.
+`componentDidMount` runs **before** the browser paints. `useEffect` **usually** runs **after** it paints.
+
+> Precise version: React only *promises* that `useEffect` runs after the DOM is updated — not exactly when. Normally that's after paint. But when the update came from a **discrete user event** (click, keypress), React 18+ runs those effects **before** the browser paints, so the result is visible in the same frame. Never rely on `useEffect` timing for visual correctness — that's `useLayoutEffect`'s job.
 
 ```
 class:  render → DOM update → componentDidMount → PAINT
@@ -477,7 +497,7 @@ function Chat({ roomId }) {
 
 Three methods and two forgettable lines collapse into one effect where **setup and cleanup can't get out of sync.** That's the argument for hooks in a nutshell.
 
-## ⚠️ Strict Mode double-invocation (React 18 dev)
+## ⚠️ Strict Mode double-invocation (development only, React 18+)
 
 In development, `<StrictMode>` deliberately **mounts, unmounts and remounts** every component — so every effect runs **twice**:
 
@@ -486,6 +506,13 @@ setup → cleanup → setup
 ```
 
 **This is not a bug.** It's React surfacing missing cleanup: an effect that isn't properly reversible will visibly misbehave (two subscriptions, a doubled counter). It doesn't happen in production. If double-invocation breaks your effect, your effect has a real bug.
+
+What Strict Mode does twice, in full:
+- **Calls component functions twice** (and `useState`/`useMemo`/`useReducer` initialisers) — to catch impure render. In React 19, the second render **reuses** the first render's `useMemo`/`useCallback` results.
+- **Runs effects setup → cleanup → setup** — to catch missing cleanup.
+- **React 19:** also calls **ref callbacks** twice (attach → detach → attach), to catch ref callbacks that don't clean up.
+
+The fix is always proper cleanup — never a `useRef` "already ran" flag to dodge the second call.
 
 ---
 
@@ -622,7 +649,7 @@ HOOK MAP   constructor              → useState / useState(() => init)
             roomId a→b:  unsubscribe(a) → subscribe(b)
             classes needed 3 methods for this and people forgot the middle one
 
-STRICT MODE React 18 dev: setup → cleanup → setup (effects run twice)
+STRICT MODE (dev, React 18+): render twice · effects setup → cleanup → setup · React 19: ref callbacks twice too
             not a bug — it exposes missing cleanup. Production runs once.
 ```
 

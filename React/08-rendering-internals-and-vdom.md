@@ -828,12 +828,19 @@ The insight is that the problem isn't the amount of work — it's that all of it
 
 ```jsx
 function handleChange(e) {
-  setQuery(e.target.value);                       // urgent — the input must feel instant
+  setQuery(e.target.value);              // urgent — the input must feel instant
   startTransition(() => {
-    setResults(filterHugeList(e.target.value));   // non-urgent — interruptible
+    setFilter(e.target.value);           // non-urgent — just the state update
   });
 }
+
+function ResultsList({ filter }) {
+  const results = filterHugeList(filter);   // the expensive work runs DURING RENDER → interruptible
+  return <ul>{results.map(r => <li key={r.id}>{r.name}</li>)}</ul>;
+}
 ```
+
+⚠️ Writing `startTransition(() => setResults(filterHugeList(value)))` instead is a classic mistake: the callback runs synchronously, so the filtering blocks the main thread **before** React gets a chance to schedule anything. Only rendering can be interrupted — so the expensive part must happen in render.
 
 Now there are two updates with different priorities from a single event. The input update commits immediately, so the character appears at once. The filtering renders in the background in interruptible slices — and if another keystroke arrives mid-render, that work is **thrown away** and restarted with the newer query rather than being completed and committed with a stale result.
 
